@@ -1,0 +1,17 @@
+{
+  "name": "studysync",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "emulators": "firebase emulators:start --only auth,firestore",
+    "test": "node --experimental-vm-modules firebase-test.js"
+  },
+  "dependencies": {
+    "firebase": "^11.8.1"
+  },
+  "browser": {
+    "fs": false,
+    "path": false,
+    "os": false
+  }
+}

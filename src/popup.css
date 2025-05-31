@@ -1,0 +1,44 @@
+body {
+    width: 300px;
+    padding: 15px;
+    font-family: 'Segoe UI', sans-serif;
+  }
+  
+  .container {
+    text-align: center;
+  }
+  
+  .logo {
+    width: 80px;
+    margin-bottom: 20px;
+  }
+  
+  button {
+    background: #4285F4;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    margin: 0 auto;
+  }
+  
+  button:hover {
+    background: #3367D6;
+  }
+  
+  .icon {
+    width: 20px;
+    margin-right: 10px;
+  }
+  
+  .hidden {
+    display: none !important;
+  }
+  
+  .error {
+    color: #d32f2f;
+    margin-top: 15px;
+  }
