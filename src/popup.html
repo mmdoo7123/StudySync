@@ -3,12 +3,6 @@
 <head>
   <title>StudySync Login</title>
   <link href="popup.css" rel="stylesheet">
-  <!-- Load Firebase via CDN -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
-  <!-- Load config first -->
-  <script src="firebase-config.js"></script>
 </head>
 <body>
   <div class="container">
@@ -24,7 +18,8 @@
     </div>
     <div id="error-message" class="error hidden"></div>
   </div>
-  <!-- Change from module to regular script -->
-  <script src="popup.js"></script>
+  
+  <!-- Using type="module" for ES imports -->
+  <script src="popup.js" type="module"></script>
 </body>
 </html>

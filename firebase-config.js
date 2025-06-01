@@ -11,7 +11,7 @@ const firebaseConfig = {
   
   // Initialize Firebase
   const app = firebase.initializeApp(firebaseConfig);
-  const auth = firebase.auth();
+  const auth = getAuth(app);
   const db = firebase.firestore();
   
   // For background script access

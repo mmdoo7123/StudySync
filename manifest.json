@@ -1,32 +1,30 @@
 {
-    "name": "StudySync Ottawa",
-    "version": "1.0",
-    "manifest_version": 3,
-    "permissions": [
-      "identity",
-      "storage",
-      "scripting",
-      "activeTab",
-      "alarms"
-    ],
-    "host_permissions": [
-      "https://accounts.google.com/*",
-      "https://*.firebaseapp.com/*",
-      "https://*.googleapis.com/*"
-    ],
-    "background": {
-      "service_worker": "background.js"
-    },
-    "action": {
-      "default_popup": "src/popup.html",
-      "default_icon": "icons/ExtensionLogo.png"
-
-    },
-    "oauth2": {
-      "client_id": "876312628673-p3w5q5055m1lo9udn92fh53rt4mjka.apps.googleusercontent.com",
-      "scopes": ["https://www.googleapis.com/auth/calendar","profile", "email"]
-    },
-    "content_security_policy": {
-  "extension_pages": "script-src 'self' https://www.gstatic.com https://*.firebaseapp.com 'wasm-unsafe-eval'; object-src 'self'"
+  "name": "StudySync Ottawa",
+  "version": "1.0",
+  "manifest_version": 3,
+  "permissions": [
+    "identity",
+    "storage",
+    "scripting",
+    "activeTab",
+    "alarms"
+  ],
+  "host_permissions": [
+    "https://*.firebaseapp.com/",
+    "https://*.googleapis.com/"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_icon": "icons/ExtensionLogo.png"
+  },
+  "oauth2": {
+    "client_id": "876312628673-p3w5q5055m1lo9udn92fh53rt4mjka.apps.googleusercontent.com",
+    "scopes": ["https://www.googleapis.com/auth/calendar", "profile", "email"]
+  },
+  "content_security_policy": {
+  "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
 }

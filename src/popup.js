@@ -4,7 +4,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const userInfoDiv = document.getElementById('user-info');
   const loginSection = document.getElementById('login-section');
   const errorDiv = document.getElementById('error-message');
-  const auth = firebase.auth(); // Now using global firebase object
+  const auth = getAuth(app);
 
   // Handle login flow
   googleLoginBtn.addEventListener('click', async () => {
