@@ -4,10 +4,16 @@
   "type": "module",
   "scripts": {
     "emulators": "firebase emulators:start --only auth,firestore",
-    "test": "node --experimental-vm-modules firebase-test.js"
+    "test": "node --experimental-vm-modules firebase-test.js",
+    "build": "rollup -c src/rollup.config.js"
   },
   "dependencies": {
     "firebase": "^11.8.1"
+  },
+  "devDependencies": {
+    "rollup": "^3.0.0",
+    "@rollup/plugin-node-resolve": "^15.0.0",
+    "@rollup/plugin-commonjs": "^25.0.0"
   },
   "browser": {
     "fs": false,

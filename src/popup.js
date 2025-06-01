@@ -1,10 +1,11 @@
+import { auth } from '../firebase/config.js';
+
 document.addEventListener('DOMContentLoaded', () => {
   const googleLoginBtn = document.getElementById('google-login-btn');
   const logoutBtn = document.getElementById('logout-btn');
   const userInfoDiv = document.getElementById('user-info');
   const loginSection = document.getElementById('login-section');
   const errorDiv = document.getElementById('error-message');
-  const auth = getAuth(app);
 
   // Handle login flow
   googleLoginBtn.addEventListener('click', async () => {

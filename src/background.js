@@ -1,42 +1,6 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
-import { getFirestore, collection, addDoc } from 'firebase/firestore';
-
-// Initialize Firebase
-const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-// Message listener
-chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
-  if (request.action === "syncDeadlines") {
-    try {
-      const user = auth.currentUser;
-      if (!user) {
-        sendResponse({ error: "User not authenticated" });
-        return;
-      }
-      
-      await addDoc(collection(db, "users", user.uid, "deadlines"), {
-        title: request.title,
-        dueDate: new Date(request.dueDate)
-      });
-      sendResponse({ success: true });
-    } catch (error) {
-      sendResponse({ error: error.message });
-    }
-  }
-  return true;
-});
+import { signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
+import { collection, addDoc } from 'firebase/firestore';
+import { auth, db } from '../../firebase/config.js';
 
 // Google Auth
 async function loginWithGoogle() {
@@ -65,12 +29,33 @@ async function loginWithGoogle() {
   }
 }
 
-// Message handler
+// Combined Message Listener
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === "googleLogin") {
+  if (request.action === "syncDeadlines") {
+    // Logic for syncDeadlines
+    (async () => { // Wrap in async IIFE to use await
+      try {
+        const user = auth.currentUser;
+        if (!user) {
+          sendResponse({ error: "User not authenticated" });
+          return;
+        }
+        
+        await addDoc(collection(db, "users", user.uid, "deadlines"), {
+          title: request.title,
+          dueDate: new Date(request.dueDate)
+        });
+        sendResponse({ success: true });
+      } catch (error) {
+        sendResponse({ error: error.message });
+      }
+    })();
+    return true; // Indicate asynchronous response
+  } else if (request.action === "googleLogin") {
+    // Logic for googleLogin
     loginWithGoogle()
       .then(user => sendResponse({ success: true, user }))
       .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
+    return true; // Indicate asynchronous response
   }
 });
