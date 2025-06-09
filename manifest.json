@@ -10,21 +10,23 @@
     "alarms"
   ],
   "host_permissions": [
-    "https://*.firebaseapp.com/",
-    "https://*.googleapis.com/"
+    "https://*.firebaseapp.com/*",
+    "https://*.googleapis.com/*",
+    "https://securetoken.googleapis.com/*",
+    "https://identitytoolkit.googleapis.com/*",
+    "https://firestore.googleapis.com/*",
+    "https://oauth2.googleapis.com/*"
   ],
   "background": {
-    "service_worker": "dist/background.js"
+    "service_worker": "src/background.js"
   },
   "action": {
     "default_popup": "src/popup.html",
     "default_icon": "icons/ExtensionLogo.png"
   },
   "oauth2": {
-    "client_id": "876312628673-p3w5q5055m1lo9udn92fh53rt4mjka.apps.googleusercontent.com",
+    "client_id": "385701813068-h70jb49tbhvcbjusfd652840760clkpg.apps.googleusercontent.com",
     "scopes": ["https://www.googleapis.com/auth/calendar", "profile", "email"]
-  },
-  "content_security_policy": {
-  "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
 }
+

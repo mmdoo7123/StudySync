@@ -1,25 +1,265 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>StudySync Login</title>
-  <link href="popup.css" rel="stylesheet">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StudySync Ottawa</title>
+    <style>
+        body {
+            width: 350px;
+            min-height: 400px;
+            margin: 0;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        .header p {
+            margin: 5px 0 0 0;
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .logo {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 15px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+        }
+
+        button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        button:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.3);
+            border-color: rgba(255, 255, 255, 0.5);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .google-btn {
+            background: #4285F4;
+            border-color: #4285F4;
+        }
+
+        .google-btn:hover:not(:disabled) {
+            background: #3367D6;
+            border-color: #3367D6;
+        }
+
+        .icon {
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #4285F4;
+        }
+
+        .section {
+            padding: 15px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .user-profile h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+        }
+
+        .user-profile p {
+            margin: 5px 0;
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            color: #fecaca;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 20px;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .feature-list {
+            list-style: none;
+            padding: 0;
+            margin: 10px 0;
+        }
+
+        .feature-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 14px;
+        }
+
+        .feature-list li:last-child {
+            border-bottom: none;
+        }
+
+        .feature-list li::before {
+            content: "✓";
+            margin-right: 8px;
+            color: #4ade80;
+            font-weight: bold;
+        }
+
+        .environment-info {
+            text-align: center;
+            opacity: 0.7;
+            font-size: 11px;
+            margin-top: 15px;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <img src="icons/extensionLogo.png" alt="StudySync" class="logo">
-    <div id="user-info" class="hidden">
-      <p>Welcome, <span id="user-email"></span></p>
-      <button id="logout-btn">Log Out</button>
+    <div class="container">
+        <div class="header">
+            <div class="logo">📚</div>
+            <h1>StudySync Ottawa</h1>
+            <p>Your study companion</p>
+        </div>
+
+        <!-- Login Section -->
+        <div id="login-section" class="section">
+            <button id="google-login-btn" class="google-btn">
+                <div class="icon">G</div>
+                Sign in with Google
+            </button>
+        </div>
+
+        <!-- User Information Section -->
+        <div id="user-info" class="section hidden">
+            <div class="user-profile">
+                <h3>Welcome!</h3>
+                <p><strong>Email:</strong> <span id="user-email">-</span></p>
+                <p><strong>Name:</strong> <span id="user-name">-</span></p>
+            </div>
+            <button id="logout-btn" class="hidden">
+                Sign Out
+            </button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading" class="loading hidden">
+            <div class="spinner"></div>
+            <span>Loading...</span>
+        </div>
+
+        <!-- Error Messages -->
+        <div id="error-message" class="error hidden">
+            <!-- Error messages will be shown here -->
+        </div>
+
+        <!-- Features Section -->
+        <div class="section">
+            <h3 style="margin: 0 0 10px 0; font-size: 16px;">Features</h3>
+            <ul class="feature-list">
+                <li>Calendar Integration</li>
+                <li>Study Session Tracking</li>
+                <li>Progress Analytics</li>
+                <li>Goal Setting</li>
+            </ul>
+        </div>
+
+        <!-- Environment Info -->
+        <div class="environment-info">
+            <div>StudySync Ottawa v1.0</div>
+            <div id="env-info">Loading...</div>
+        </div>
     </div>
-    <div id="login-section">
-      <button id="google-login-btn">
-        <img src="icons/googleIcon.jpg" class="icon"> Sign in with Google
-      </button>
-    </div>
-    <div id="error-message" class="error hidden"></div>
-  </div>
-  
-  <!-- Using type="module" for ES imports -->
-  <script src="popup.js" type="module"></script>
+
+    <!-- Load the popup script as a module -->
+    <script src="popup.js" type="module"></script>
+    
+    <!-- Add environment info -->
+    <script>
+        // Display environment info
+        document.addEventListener('DOMContentLoaded', () => {
+            const envInfo = document.getElementById('env-info');
+            const extensionId = chrome.runtime.id;
+            const isDev = extensionId && extensionId.length < 32;
+            envInfo.textContent = `${isDev ? 'Development' : 'Production'} Mode`;
+        });
+    </script>
 </body>
 </html>
+
