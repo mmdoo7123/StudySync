@@ -15,7 +15,11 @@
     "https://securetoken.googleapis.com/*",
     "https://identitytoolkit.googleapis.com/*",
     "https://firestore.googleapis.com/*",
-    "https://oauth2.googleapis.com/*"
+    "https://oauth2.googleapis.com/*",
+    "https://uottawa.brightspace.com/"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
   ],
   "background": {
     "service_worker": "src/background.js"

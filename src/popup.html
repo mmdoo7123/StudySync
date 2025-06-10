@@ -4,262 +4,418 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>StudySync Ottawa</title>
-    <style>
-        body {
-            width: 350px;
-            min-height: 400px;
-            margin: 0;
-            padding: 20px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-
-        .container {
-            display: flex;
-            flex-direction: column;
-            gap: 15px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .header h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 600;
-        }
-
-        .header p {
-            margin: 5px 0 0 0;
-            opacity: 0.9;
-            font-size: 14px;
-        }
-
-        .logo {
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 15px;
-            background: rgba(255, 255, 255, 0.2);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 32px;
-        }
-
-        button {
-            background: rgba(255, 255, 255, 0.2);
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            color: white;
-            padding: 12px 20px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.3s ease;
-            backdrop-filter: blur(10px);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-        }
-
-        button:hover:not(:disabled) {
-            background: rgba(255, 255, 255, 0.3);
-            border-color: rgba(255, 255, 255, 0.5);
-            transform: translateY(-1px);
-        }
-
-        button:active {
-            transform: translateY(0);
-        }
-
-        button:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-        }
-
-        .google-btn {
-            background: #4285F4;
-            border-color: #4285F4;
-        }
-
-        .google-btn:hover:not(:disabled) {
-            background: #3367D6;
-            border-color: #3367D6;
-        }
-
-        .icon {
-            width: 20px;
-            height: 20px;
-            background: white;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            color: #4285F4;
-        }
-
-        .section {
-            padding: 15px;
-            border-radius: 8px;
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .user-profile h3 {
-            margin: 0 0 10px 0;
-            font-size: 18px;
-        }
-
-        .user-profile p {
-            margin: 5px 0;
-            font-size: 14px;
-            opacity: 0.9;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .error {
-            background: rgba(239, 68, 68, 0.2);
-            border: 1px solid rgba(239, 68, 68, 0.4);
-            color: #fecaca;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 14px;
-            margin-top: 10px;
-        }
-
-        .loading {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            padding: 20px;
-        }
-
-        .spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-top: 2px solid white;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .feature-list {
-            list-style: none;
-            padding: 0;
-            margin: 10px 0;
-        }
-
-        .feature-list li {
-            padding: 8px 0;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-            font-size: 14px;
-        }
-
-        .feature-list li:last-child {
-            border-bottom: none;
-        }
-
-        .feature-list li::before {
-            content: "✓";
-            margin-right: 8px;
-            color: #4ade80;
-            font-weight: bold;
-        }
-
-        .environment-info {
-            text-align: center;
-            opacity: 0.7;
-            font-size: 11px;
-            margin-top: 15px;
-        }
-    </style>
+    <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">📚</div>
-            <h1>StudySync Ottawa</h1>
-            <p>Your study companion</p>
-        </div>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-section">
+                <div class="logo">📚</div>
+                <div class="brand-info">
+                    <h1>StudySync</h1>
+                    <span class="tagline">Smart Study Companion</span>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="theme-toggle" class="icon-btn" title="Toggle theme">
+                    <span class="icon">🌙</span>
+                </button>
+                <button id="settings-btn" class="icon-btn" title="Settings">
+                    <span class="icon">⚙️</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="tab-navigation">
+            <button class="tab-btn active" data-tab="dashboard">
+                <span class="icon">📊</span>
+                <span>Dashboard</span>
+            </button>
+            <button class="tab-btn" data-tab="study">
+                <span class="icon">⏱️</span>
+                <span>Study</span>
+            </button>
+            <button class="tab-btn" data-tab="courses">
+                <span class="icon">📚</span>
+                <span>Courses</span>
+            </button>
+            <button class="tab-btn" data-tab="analytics">
+                <span class="icon">📈</span>
+                <span>Analytics</span>
+            </button>
+        </nav>
 
         <!-- Login Section -->
         <div id="login-section" class="section">
-            <button id="google-login-btn" class="google-btn">
-                <div class="icon">G</div>
-                Sign in with Google
-            </button>
-        </div>
-
-        <!-- User Information Section -->
-        <div id="user-info" class="section hidden">
-            <div class="user-profile">
-                <h3>Welcome!</h3>
-                <p><strong>Email:</strong> <span id="user-email">-</span></p>
-                <p><strong>Name:</strong> <span id="user-name">-</span></p>
+            <div class="login-card">
+                <div class="login-header">
+                    <h2>Welcome to StudySync</h2>
+                    <p>Your intelligent study companion for academic success</p>
+                </div>
+                <button id="google-login-btn" class="primary-btn">
+                    <span class="google-icon">G</span>
+                    Sign in with Google
+                </button>
+                <div class="login-features">
+                    <div class="feature-item">
+                        <span class="feature-icon">🎯</span>
+                        <span>Smart Goal Tracking</span>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">📊</span>
+                        <span>Advanced Analytics</span>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">🔥</span>
+                        <span>Study Streaks</span>
+                    </div>
+                </div>
             </div>
-            <button id="logout-btn" class="hidden">
-                Sign Out
-            </button>
         </div>
 
-        <!-- Loading Indicator -->
-        <div id="loading" class="loading hidden">
-            <div class="spinner"></div>
-            <span>Loading...</span>
+        <!-- Main Content Area -->
+        <main id="main-content" class="main-content hidden">
+            <!-- Dashboard Tab -->
+            <div id="dashboard-tab" class="tab-content active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="today-time">0h 0m</span>
+                            <span class="stat-label">Today</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔥</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="study-streak">0</span>
+                            <span class="stat-label">Day Streak</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🎯</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="goals-completed">0/3</span>
+                            <span class="stat-label">Goals</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📚</div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="active-courses">0</span>
+                            <span class="stat-label">Courses</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-sections">
+                    <div class="section-card">
+                        <h3>Quick Actions</h3>
+                        <div class="quick-actions">
+                            <button class="action-btn" id="start-study-btn">
+                                <span class="icon">▶️</span>
+                                Start Study Session
+                            </button>
+                            <button class="action-btn" id="sync-brightspace-btn">
+                                <span class="icon">🔄</span>
+                                Sync Brightspace
+                            </button>
+                            <button class="action-btn" id="view-calendar-btn">
+                                <span class="icon">📅</span>
+                                View Calendar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="section-card">
+                        <h3>Recent Activity</h3>
+                        <div id="recent-activity" class="activity-list">
+                            <div class="activity-item">
+                                <span class="activity-icon">📖</span>
+                                <div class="activity-info">
+                                    <span class="activity-title">Computer Science - 45 min</span>
+                                    <span class="activity-time">2 hours ago</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Study Tab -->
+            <div id="study-tab" class="tab-content">
+                <div class="study-session-card">
+                    <div class="timer-display">
+                        <div class="timer-circle">
+                            <svg class="timer-svg" viewBox="0 0 100 100">
+                                <circle cx="50" cy="50" r="45" class="timer-bg"></circle>
+                                <circle cx="50" cy="50" r="45" class="timer-progress" id="timer-progress"></circle>
+                            </svg>
+                            <div class="timer-text">
+                                <span id="timer-display">25:00</span>
+                                <span class="timer-mode">Focus Time</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="study-controls">
+                        <div class="session-setup">
+                            <select id="study-subject" class="form-select">
+                                <option value="">Select Subject</option>
+                                <option value="computer-science">Computer Science</option>
+                                <option value="mathematics">Mathematics</option>
+                                <option value="physics">Physics</option>
+                                <option value="chemistry">Chemistry</option>
+                            </select>
+                            <input type="text" id="study-topic" class="form-input" placeholder="What are you studying?">
+                        </div>
+
+                        <div class="timer-controls">
+                            <button id="start-timer-btn" class="primary-btn">
+                                <span class="icon">▶️</span>
+                                Start Focus Session
+                            </button>
+                            <button id="pause-timer-btn" class="secondary-btn hidden">
+                                <span class="icon">⏸️</span>
+                                Pause
+                            </button>
+                            <button id="stop-timer-btn" class="danger-btn hidden">
+                                <span class="icon">⏹️</span>
+                                Stop
+                            </button>
+                        </div>
+
+                        <div class="session-modes">
+                            <button class="mode-btn active" data-mode="focus" data-duration="25">
+                                Focus (25m)
+                            </button>
+                            <button class="mode-btn" data-mode="short-break" data-duration="5">
+                                Short Break (5m)
+                            </button>
+                            <button class="mode-btn" data-mode="long-break" data-duration="15">
+                                Long Break (15m)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Courses Tab -->
+            <div id="courses-tab" class="tab-content">
+                <div class="courses-header">
+                    <h2>My Courses</h2>
+                    <button id="sync-courses-btn" class="primary-btn">
+                        <span class="icon">🔄</span>
+                        Sync from Brightspace
+                    </button>
+                </div>
+
+                <div id="courses-list" class="courses-grid">
+                    <div class="course-card placeholder">
+                        <div class="course-icon">📚</div>
+                        <div class="course-info">
+                            <h3>No courses yet</h3>
+                            <p>Sync your Brightspace courses to get started</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics Tab -->
+            <div id="analytics-tab" class="tab-content">
+                <div class="analytics-header">
+                    <h2>Study Analytics</h2>
+                    <div class="time-filter">
+                        <button class="filter-btn active" data-period="week">Week</button>
+                        <button class="filter-btn" data-period="month">Month</button>
+                        <button class="filter-btn" data-period="semester">Semester</button>
+                    </div>
+                </div>
+
+                <div class="analytics-grid">
+                    <div class="chart-card">
+                        <h3>Study Time Distribution</h3>
+                        <div id="subject-chart" class="chart-container">
+                            <div class="chart-placeholder">
+                                <span class="icon">📊</span>
+                                <p>Start studying to see your analytics</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <h3>Weekly Progress</h3>
+                        <div id="progress-chart" class="chart-container">
+                            <div class="progress-bars">
+                                <div class="progress-day">
+                                    <span class="day-label">Mon</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 80%"></div>
+                                    </div>
+                                    <span class="time-label">2h</span>
+                                </div>
+                                <div class="progress-day">
+                                    <span class="day-label">Tue</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 60%"></div>
+                                    </div>
+                                    <span class="time-label">1.5h</span>
+                                </div>
+                                <div class="progress-day">
+                                    <span class="day-label">Wed</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 100%"></div>
+                                    </div>
+                                    <span class="time-label">2.5h</span>
+                                </div>
+                                <div class="progress-day">
+                                    <span class="day-label">Thu</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 40%"></div>
+                                    </div>
+                                    <span class="time-label">1h</span>
+                                </div>
+                                <div class="progress-day">
+                                    <span class="day-label">Fri</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 90%"></div>
+                                    </div>
+                                    <span class="time-label">2.2h</span>
+                                </div>
+                                <div class="progress-day">
+                                    <span class="day-label">Sat</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 70%"></div>
+                                    </div>
+                                    <span class="time-label">1.8h</span>
+                                </div>
+                                <div class="progress-day">
+                                    <span class="day-label">Sun</span>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill" style="width: 50%"></div>
+                                    </div>
+                                    <span class="time-label">1.2h</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="insights-section">
+                    <h3>Study Insights</h3>
+                    <div class="insights-grid">
+                        <div class="insight-card">
+                            <span class="insight-icon">🎯</span>
+                            <div class="insight-content">
+                                <h4>Most Productive Time</h4>
+                                <p>You study best between 2-4 PM</p>
+                            </div>
+                        </div>
+                        <div class="insight-card">
+                            <span class="insight-icon">📈</span>
+                            <div class="insight-content">
+                                <h4>Weekly Improvement</h4>
+                                <p>+15% more study time than last week</p>
+                            </div>
+                        </div>
+                        <div class="insight-card">
+                            <span class="insight-icon">🏆</span>
+                            <div class="insight-content">
+                                <h4>Achievement Unlocked</h4>
+                                <p>7-day study streak completed!</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Terms & Conditions Modal -->
+        <div id="terms-modal" class="modal hidden">
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Terms & Conditions</h3>
+                    <p>Please review and accept our terms to continue</p>
+                </div>
+                <div class="terms-content">
+                    <div class="terms-section">
+                        <h4>Data Collection & Privacy</h4>
+                        <p>StudySync collects study session data, course information from Brightspace, and usage analytics to provide personalized insights and improve your learning experience.</p>
+                    </div>
+                    <div class="terms-section">
+                        <h4>Brightspace Integration</h4>
+                        <p>By agreeing, you authorize StudySync to access your Brightspace course data including course names, schedules, and assignment information for study planning purposes.</p>
+                    </div>
+                    <div class="terms-section">
+                        <h4>Data Security</h4>
+                        <p>Your data is encrypted and stored securely. We never share your personal information with third parties without your explicit consent.</p>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="agree-checkbox">
+                        <span class="checkmark"></span>
+                        I agree to the Terms & Conditions and Privacy Policy
+                    </label>
+                    <div class="button-group">
+                        <button id="decline-btn" class="secondary-btn">Decline</button>
+                        <button id="agree-btn" class="primary-btn" disabled>Accept & Continue</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
-        <!-- Error Messages -->
-        <div id="error-message" class="error hidden">
-            <!-- Error messages will be shown here -->
+        <!-- User Profile Dropdown -->
+        <div id="user-profile" class="user-profile hidden">
+            <div class="profile-header">
+                <img id="user-avatar" class="profile-avatar" src="" alt="User Avatar">
+                <div class="profile-info">
+                    <span id="user-name" class="profile-name">-</span>
+                    <span id="user-email" class="profile-email">-</span>
+                </div>
+            </div>
+            <div class="profile-actions">
+                <button id="logout-btn" class="profile-btn">
+                    <span class="icon">🚪</span>
+                    Sign Out
+                </button>
+            </div>
         </div>
 
-        <!-- Features Section -->
-        <div class="section">
-            <h3 style="margin: 0 0 10px 0; font-size: 16px;">Features</h3>
-            <ul class="feature-list">
-                <li>Calendar Integration</li>
-                <li>Study Session Tracking</li>
-                <li>Progress Analytics</li>
-                <li>Goal Setting</li>
-            </ul>
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="loading-spinner">
+                <div class="spinner"></div>
+                <span id="loading-text">Loading...</span>
+            </div>
         </div>
 
-        <!-- Environment Info -->
-        <div class="environment-info">
-            <div>StudySync Ottawa v1.0</div>
-            <div id="env-info">Loading...</div>
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container"></div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-info">
+                <span id="sync-status" class="status-item">
+                    <span class="status-icon">🔄</span>
+                    <span>Last sync: Never</span>
+                </span>
+                <span id="connection-status" class="status-item">
+                    <span class="status-icon">🟢</span>
+                    <span>Online</span>
+                </span>
+            </div>
+            <div class="version-info">
+                <span>StudySync v2.0</span>
+                <span id="env-info">Production</span>
+            </div>
         </div>
     </div>
 
-    <!-- Load the popup script as a module -->
-    <script src="popup.js" type="module"></script>
-    
-    <!-- Add environment info -->
-    <script>
-        // Display environment info
-        document.addEventListener('DOMContentLoaded', () => {
-            const envInfo = document.getElementById('env-info');
-            const extensionId = chrome.runtime.id;
-            const isDev = extensionId && extensionId.length < 32;
-            envInfo.textContent = `${isDev ? 'Development' : 'Production'} Mode`;
-        });
-    </script>
+    <script src="popup.js"></script>
 </body>
 </html>
 

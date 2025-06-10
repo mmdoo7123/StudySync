@@ -1,307 +1,613 @@
-// src/background.js
-// Chrome Extension Background Service Worker - No Firebase Imports
+// StudySync Enhanced Background Script
+// Version 2.0 - Professional Service Worker
 
-// Environment detection utility
-const ExtensionEnv = {
-  isDevelopment: () => {
-    const extensionId = chrome.runtime.id;
-    return extensionId && extensionId.length < 32;
-  },
-  
-  isProduction: () => {
-    return !ExtensionEnv.isDevelopment();
-  },
-  
-  getEnvironment: () => {
-    return ExtensionEnv.isDevelopment() ? 'development' : 'production';
+class StudySyncBackground {
+  constructor() {
+      this.init();
   }
-};
 
-// Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyCtPHdkiuicxgC3pQNB49lpjbLkEHQQ4K0",
-  authDomain: "studysync-d812e.firebaseapp.com",
-  projectId: "studysync-d812e",
-  storageBucket: "studysync-d812e.firebasestorage.app",
-  messagingSenderId: "385701813068",
-  appId: "1:385701813068:web:e49ef1d44bd361197c4de9",
-  measurementId: "G-Z448Z2EH5N"
-};
-
-// Service Worker event listeners
-chrome.runtime.onInstalled.addListener(async (details) => {
-  console.log('Extension installed:', details);
-  
-  try {
-    // Set up initial storage
-    await chrome.storage.local.set({
-      environment: ExtensionEnv.getEnvironment(),
-      installTime: Date.now()
-    });
-    
-    console.log('Installation setup completed');
-  } catch (error) {
-    console.error('Installation setup failed:', error);
-  }
-});
-
-// Handle messages from popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Received message:', message);
-  
-  if (message.action === 'googleLogin') {
-    handleGoogleLogin()
-      .then(result => sendResponse({ success: true, user: result }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true; // Keep message channel open for async response
-  }
-  
-  if (message.action === 'saveUserData') {
-    saveUserDataToFirestore(message.userData)
-      .then(() => sendResponse({ success: true }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-  
-  if (message.action === 'getUserData') {
-    getUserDataFromFirestore()
-      .then(data => sendResponse({ success: true, data }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-  
-  if (message.action === 'getEnvironment') {
-    sendResponse({
-      environment: ExtensionEnv.getEnvironment(),
-      isDevelopment: ExtensionEnv.isDevelopment()
-    });
-  }
-});
-
-// Google Login handler using Chrome Identity API
-async function handleGoogleLogin() {
-  try {
-    console.log('Starting Google login...');
-    
-    // Use Chrome Identity API to get OAuth token
-    const token = await new Promise((resolve, reject) => {
-      chrome.identity.getAuthToken({ interactive: true }, (token) => {
-        if (chrome.runtime.lastError) {
-          reject(new Error(chrome.runtime.lastError.message));
-        } else if (!token) {
-          reject(new Error('No token received'));
-        } else {
-          resolve(token);
-        }
+  init() {
+      console.log('StudySync Enhanced Background v2.0 - Starting...');
+      
+      // Setup message listeners
+      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+          this.handleMessage(request, sender, sendResponse);
+          return true; // Keep message channel open for async responses
       });
-    });
-    
-    console.log('Token received, getting user info...');
-    
-    // Get user info from Google API
-    const userInfo = await getUserInfoFromGoogle(token);
-    
-    // Store user info in extension storage
-    await chrome.storage.local.set({
-      userId: userInfo.id,
-      userEmail: userInfo.email,
-      userName: userInfo.name,
-      userPicture: userInfo.picture,
-      accessToken: token,
-      lastLogin: Date.now()
-    });
-    
-    console.log('User authenticated successfully:', userInfo.id);
-    
-    return {
-      uid: userInfo.id,
-      email: userInfo.email,
-      displayName: userInfo.name,
-      photoURL: userInfo.picture
-    };
-  } catch (error) {
-    console.error('Google login failed:', error);
-    throw error;
-  }
-}
 
-// Get user info from Google API
-async function getUserInfoFromGoogle(token) {
-  try {
-    const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: {
-        'Authorization': `Bearer ${token}`
+      // Setup installation listener
+      chrome.runtime.onInstalled.addListener((details) => {
+          this.handleInstallation(details);
+      });
+
+      // Setup alarm listeners for notifications
+      chrome.alarms.onAlarm.addListener((alarm) => {
+          this.handleAlarm(alarm);
+      });
+
+      console.log('StudySync Enhanced Background - Ready!');
+  }
+
+  async handleMessage(request, sender, sendResponse) {
+      try {
+          switch (request.action) {
+              case 'authenticate':
+                  await this.handleAuthentication(sendResponse);
+                  break;
+              
+              case 'scrapeBrightspace':
+                  await this.handleBrightspaceScraping(sendResponse);
+                  break;
+              
+              case 'setStudyReminder':
+                  await this.setStudyReminder(request.data, sendResponse);
+                  break;
+              
+              case 'getAnalytics':
+                  await this.getAnalytics(request.period, sendResponse);
+                  break;
+              
+              case 'exportData':
+                  await this.exportStudyData(sendResponse);
+                  break;
+              
+              default:
+                  sendResponse({ success: false, error: 'Unknown action' });
+          }
+      } catch (error) {
+          console.error('Background message error:', error);
+          sendResponse({ success: false, error: error.message });
       }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Google API error: ${response.status}`);
-    }
-    
-    return await response.json();
-  } catch (error) {
-    console.error('Failed to get user info from Google:', error);
-    throw error;
   }
-}
 
-// Save user data to Firestore using REST API
-async function saveUserDataToFirestore(userData) {
-  try {
-    const { userId, accessToken } = await chrome.storage.local.get(['userId', 'accessToken']);
-    if (!userId || !accessToken) {
-      throw new Error('User not authenticated');
-    }
-    
-    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/users/${userId}`;
-    
-    const document = {
-      fields: {}
-    };
-    
-    // Convert userData to Firestore format
-    for (const [key, value] of Object.entries(userData)) {
-      if (typeof value === 'string') {
-        document.fields[key] = { stringValue: value };
-      } else if (typeof value === 'number') {
-        document.fields[key] = { doubleValue: value };
-      } else if (typeof value === 'boolean') {
-        document.fields[key] = { booleanValue: value };
-      } else {
-        document.fields[key] = { stringValue: JSON.stringify(value) };
+  async handleAuthentication(sendResponse) {
+      try {
+          console.log('Starting Google OAuth authentication...');
+          
+          // Get OAuth token using Chrome Identity API
+          const token = await new Promise((resolve, reject) => {
+              chrome.identity.getAuthToken({ interactive: true }, (token) => {
+                  if (chrome.runtime.lastError) {
+                      reject(new Error(chrome.runtime.lastError.message));
+                  } else {
+                      resolve(token);
+                  }
+              });
+          });
+
+          if (!token) {
+              throw new Error('Failed to get authentication token');
+          }
+
+          // Get user info from Google API
+          const userResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${token}`);
+          
+          if (!userResponse.ok) {
+              throw new Error('Failed to fetch user information');
+          }
+
+          const userData = await userResponse.json();
+          
+          const user = {
+              id: userData.id,
+              email: userData.email,
+              name: userData.name,
+              picture: userData.picture,
+              token: token,
+              authenticatedAt: Date.now()
+          };
+
+          console.log('Authentication successful:', user.email);
+          sendResponse({ success: true, user });
+
+      } catch (error) {
+          console.error('Authentication error:', error);
+          sendResponse({ success: false, error: error.message });
       }
-    }
-    
-    // Add metadata
-    document.fields.lastUpdated = { timestampValue: new Date().toISOString() };
-    document.fields.environment = { stringValue: ExtensionEnv.getEnvironment() };
-    
-    const response = await fetch(firestoreUrl + '?updateMask.fieldPaths=*', {
-      method: 'PATCH',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(document)
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Firestore error: ${response.status}`);
-    }
-    
-    console.log('User data saved successfully');
-  } catch (error) {
-    console.error('Failed to save user data:', error);
-    throw error;
   }
-}
 
-// Get user data from Firestore using REST API
-async function getUserDataFromFirestore() {
-  try {
-    const { userId, accessToken } = await chrome.storage.local.get(['userId', 'accessToken']);
-    if (!userId || !accessToken) {
-      throw new Error('User not authenticated');
-    }
-    
-    const firestoreUrl = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/users/${userId}`;
-    
-    const response = await fetch(firestoreUrl, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`
+  async handleBrightspaceScraping(sendResponse) {
+      try {
+          console.log('Starting Brightspace data scraping...');
+
+          // Find or create Brightspace tab
+          const brightspaceTab = await this.findOrCreateBrightspaceTab();
+          
+          if (!brightspaceTab) {
+              throw new Error('Could not access Brightspace. Please log in first.');
+          }
+
+          // Inject and execute scraper
+          const results = await chrome.scripting.executeScript({
+              target: { tabId: brightspaceTab.id },
+              func: this.brightspaceScraper
+          });
+
+          if (!results || !results[0]) {
+              throw new Error('Failed to execute scraper script');
+          }
+
+          const scrapedData = results[0].result;
+          
+          if (!scrapedData.success) {
+              throw new Error(scrapedData.error || 'Scraping failed');
+          }
+
+          console.log(`Successfully scraped ${scrapedData.courses.length} courses`);
+          
+          // Enhance course data with additional information
+          const enhancedCourses = await this.enhanceCourseData(scrapedData.courses);
+          
+          sendResponse({ 
+              success: true, 
+              courses: enhancedCourses,
+              scrapedAt: Date.now()
+          });
+
+      } catch (error) {
+          console.error('Brightspace scraping error:', error);
+          sendResponse({ success: false, error: error.message });
       }
-    });
-    
-    if (response.status === 404) {
-      return null; // Document doesn't exist
-    }
-    
-    if (!response.ok) {
-      throw new Error(`Firestore error: ${response.status}`);
-    }
-    
-    const document = await response.json();
-    
-    // Convert Firestore format to regular object
-    const userData = {};
-    if (document.fields) {
-      for (const [key, value] of Object.entries(document.fields)) {
-        if (value.stringValue !== undefined) {
-          userData[key] = value.stringValue;
-        } else if (value.doubleValue !== undefined) {
-          userData[key] = value.doubleValue;
-        } else if (value.booleanValue !== undefined) {
-          userData[key] = value.booleanValue;
-        } else if (value.timestampValue !== undefined) {
-          userData[key] = value.timestampValue;
-        }
+  }
+
+  async findOrCreateBrightspaceTab() {
+      try {
+          // First, try to find existing Brightspace tab
+          const tabs = await chrome.tabs.query({});
+          const brightspaceTab = tabs.find(tab => 
+              tab.url && tab.url.includes('brightspace.uottawa.ca')
+          );
+
+          if (brightspaceTab) {
+              // Activate existing tab
+              await chrome.tabs.update(brightspaceTab.id, { active: true });
+              await chrome.windows.update(brightspaceTab.windowId, { focused: true });
+              return brightspaceTab;
+          }
+
+          // Create new tab if none exists
+          const newTab = await chrome.tabs.create({
+              url: 'https://brightspace.uottawa.ca/d2l/home',
+              active: true
+          });
+
+          // Wait for tab to load
+          await new Promise((resolve) => {
+              const listener = (tabId, changeInfo) => {
+                  if (tabId === newTab.id && changeInfo.status === 'complete') {
+                      chrome.tabs.onUpdated.removeListener(listener);
+                      resolve();
+                  }
+              };
+              chrome.tabs.onUpdated.addListener(listener);
+          });
+
+          return newTab;
+
+      } catch (error) {
+          console.error('Error finding/creating Brightspace tab:', error);
+          return null;
       }
-    }
-    
-    return userData;
-  } catch (error) {
-    console.error('Failed to get user data:', error);
-    throw error;
+  }
+
+  // Enhanced Brightspace scraper function
+  brightspaceScraper() {
+      try {
+          console.log('Executing Brightspace scraper...');
+
+          // Check if we're on the right page
+          if (!window.location.href.includes('brightspace.uottawa.ca')) {
+              return { success: false, error: 'Not on Brightspace domain' };
+          }
+
+          // Wait for page to be fully loaded
+          if (document.readyState !== 'complete') {
+              return { success: false, error: 'Page still loading' };
+          }
+
+          const courses = [];
+
+          // Try multiple selectors for course cards
+          const courseSelectors = [
+              '.d2l-card',
+              '.d2l-course-tile',
+              '[data-automation-id="course-tile"]',
+              '.d2l-enrollment-card',
+              '.d2l-widget-content'
+          ];
+
+          let courseElements = [];
+          
+          for (const selector of courseSelectors) {
+              courseElements = document.querySelectorAll(selector);
+              if (courseElements.length > 0) {
+                  console.log(`Found ${courseElements.length} courses using selector: ${selector}`);
+                  break;
+              }
+          }
+
+          if (courseElements.length === 0) {
+              // Try alternative approach - look for course links
+              const courseLinks = document.querySelectorAll('a[href*="/d2l/le/content/"]');
+              if (courseLinks.length > 0) {
+                  courseLinks.forEach((link, index) => {
+                      const courseName = link.textContent.trim();
+                      if (courseName && courseName.length > 3) {
+                          courses.push({
+                              id: `course_${index}`,
+                              name: courseName,
+                              code: this.extractCourseCode(courseName),
+                              url: link.href,
+                              lastAccessed: null,
+                              isActive: true
+                          });
+                      }
+                  });
+              }
+          } else {
+              // Process course cards
+              courseElements.forEach((element, index) => {
+                  try {
+                      const courseData = this.extractCourseInfo(element, index);
+                      if (courseData) {
+                          courses.push(courseData);
+                      }
+                  } catch (error) {
+                      console.warn(`Error processing course element ${index}:`, error);
+                  }
+              });
+          }
+
+          // Remove duplicates
+          const uniqueCourses = courses.filter((course, index, self) => 
+              index === self.findIndex(c => c.name === course.name)
+          );
+
+          console.log(`Scraped ${uniqueCourses.length} unique courses`);
+
+          return { 
+              success: true, 
+              courses: uniqueCourses,
+              timestamp: Date.now(),
+              url: window.location.href
+          };
+
+      } catch (error) {
+          console.error('Scraper execution error:', error);
+          return { success: false, error: error.message };
+      }
+  }
+
+  extractCourseInfo(element, index) {
+      // Try to extract course name
+      const nameSelectors = [
+          '.d2l-card-header',
+          '.d2l-course-tile-title',
+          '.d2l-heading',
+          'h2', 'h3', 'h4',
+          '[data-automation-id="course-title"]'
+      ];
+
+      let courseName = '';
+      for (const selector of nameSelectors) {
+          const nameEl = element.querySelector(selector);
+          if (nameEl && nameEl.textContent.trim()) {
+              courseName = nameEl.textContent.trim();
+              break;
+          }
+      }
+
+      // Try to extract course URL
+      let courseUrl = '';
+      const linkEl = element.querySelector('a[href*="/d2l/"]') || element.closest('a');
+      if (linkEl && linkEl.href) {
+          courseUrl = linkEl.href;
+      }
+
+      // Try to extract additional info
+      const codeMatch = courseName.match(/([A-Z]{3,4}\s*\d{4})/);
+      const courseCode = codeMatch ? codeMatch[1] : '';
+
+      if (courseName && courseName.length > 3) {
+          return {
+              id: `course_${index}_${Date.now()}`,
+              name: courseName,
+              code: courseCode,
+              url: courseUrl,
+              lastAccessed: this.extractLastAccessed(element),
+              isActive: true,
+              scrapedAt: Date.now()
+          };
+      }
+
+      return null;
+  }
+
+  extractCourseCode(courseName) {
+      const codeMatch = courseName.match(/([A-Z]{3,4}\s*\d{4})/);
+      return codeMatch ? codeMatch[1] : '';
+  }
+
+  extractLastAccessed(element) {
+      const timeSelectors = [
+          '.d2l-card-footer time',
+          '.d2l-last-accessed',
+          '[data-automation-id="last-accessed"]'
+      ];
+
+      for (const selector of timeSelectors) {
+          const timeEl = element.querySelector(selector);
+          if (timeEl) {
+              return timeEl.textContent.trim();
+          }
+      }
+      return null;
+  }
+
+  async enhanceCourseData(courses) {
+      // Add additional metadata and processing
+      return courses.map(course => ({
+          ...course,
+          semester: this.detectSemester(),
+          year: new Date().getFullYear(),
+          category: this.categorizeCourse(course.name),
+          priority: this.calculatePriority(course),
+          studyTime: 0,
+          lastStudied: null,
+          goals: [],
+          assignments: [],
+          schedule: null
+      }));
+  }
+
+  detectSemester() {
+      const month = new Date().getMonth();
+      if (month >= 8 || month <= 0) return 'Fall';
+      if (month >= 1 && month <= 4) return 'Winter';
+      return 'Summer';
+  }
+
+  categorizeCourse(courseName) {
+      const categories = {
+          'Computer Science': ['CSI', 'SEG', 'CEG', 'ITI'],
+          'Mathematics': ['MAT', 'STA'],
+          'Engineering': ['ELG', 'MCG', 'CVG'],
+          'Science': ['PHY', 'CHM', 'BIO'],
+          'Business': ['ADM', 'ECO'],
+          'Languages': ['FRA', 'ESP', 'GER']
+      };
+
+      for (const [category, codes] of Object.entries(categories)) {
+          if (codes.some(code => courseName.includes(code))) {
+              return category;
+          }
+      }
+      return 'Other';
+  }
+
+  calculatePriority(course) {
+      // Simple priority calculation based on course level
+      const codeMatch = course.code.match(/\d{4}/);
+      if (codeMatch) {
+          const level = parseInt(codeMatch[0]);
+          if (level >= 4000) return 'High';
+          if (level >= 3000) return 'Medium';
+          return 'Low';
+      }
+      return 'Medium';
+  }
+
+  async setStudyReminder(data, sendResponse) {
+      try {
+          const { time, message, recurring } = data;
+          
+          // Create alarm
+          await chrome.alarms.create('studyReminder', {
+              when: time,
+              periodInMinutes: recurring ? 1440 : undefined // Daily if recurring
+          });
+
+          // Store reminder data
+          await chrome.storage.local.set({
+              studyReminder: { time, message, recurring, active: true }
+          });
+
+          sendResponse({ success: true });
+      } catch (error) {
+          console.error('Error setting study reminder:', error);
+          sendResponse({ success: false, error: error.message });
+      }
+  }
+
+  async getAnalytics(period, sendResponse) {
+      try {
+          const { studyData } = await chrome.storage.local.get(['studyData']);
+          
+          if (!studyData || !studyData.sessions) {
+              sendResponse({ success: true, analytics: this.getEmptyAnalytics() });
+              return;
+          }
+
+          const analytics = this.calculateAnalytics(studyData.sessions, period);
+          sendResponse({ success: true, analytics });
+      } catch (error) {
+          console.error('Error getting analytics:', error);
+          sendResponse({ success: false, error: error.message });
+      }
+  }
+
+  calculateAnalytics(sessions, period) {
+      const now = Date.now();
+      const periodMs = {
+          'week': 7 * 24 * 60 * 60 * 1000,
+          'month': 30 * 24 * 60 * 60 * 1000,
+          'semester': 120 * 24 * 60 * 60 * 1000
+      };
+
+      const cutoff = now - (periodMs[period] || periodMs.week);
+      const filteredSessions = sessions.filter(s => s.timestamp >= cutoff);
+
+      return {
+          totalTime: filteredSessions.reduce((sum, s) => sum + s.duration, 0),
+          sessionCount: filteredSessions.length,
+          averageSession: filteredSessions.length > 0 ? 
+              filteredSessions.reduce((sum, s) => sum + s.duration, 0) / filteredSessions.length : 0,
+          subjectBreakdown: this.getSubjectBreakdown(filteredSessions),
+          dailyProgress: this.getDailyProgress(filteredSessions, period),
+          productivity: this.calculateProductivity(filteredSessions),
+          goals: this.getGoalProgress(filteredSessions)
+      };
+  }
+
+  getSubjectBreakdown(sessions) {
+      const breakdown = {};
+      sessions.forEach(session => {
+          breakdown[session.subject] = (breakdown[session.subject] || 0) + session.duration;
+      });
+      return breakdown;
+  }
+
+  getDailyProgress(sessions, period) {
+      const days = period === 'week' ? 7 : period === 'month' ? 30 : 120;
+      const progress = new Array(days).fill(0);
+      
+      sessions.forEach(session => {
+          const dayIndex = Math.floor((Date.now() - session.timestamp) / (24 * 60 * 60 * 1000));
+          if (dayIndex < days) {
+              progress[days - 1 - dayIndex] += session.duration;
+          }
+      });
+      
+      return progress;
+  }
+
+  calculateProductivity(sessions) {
+      if (sessions.length === 0) return 0;
+      
+      const totalTime = sessions.reduce((sum, s) => sum + s.duration, 0);
+      const averageSession = totalTime / sessions.length;
+      
+      // Productivity score based on session length and consistency
+      const consistencyScore = sessions.length / 30; // Sessions per month
+      const lengthScore = Math.min(averageSession / 60, 1); // Normalize to 1 hour
+      
+      return Math.min((consistencyScore + lengthScore) / 2, 1) * 100;
+  }
+
+  getGoalProgress(sessions) {
+      // This would integrate with actual goal data
+      return {
+          daily: sessions.filter(s => this.isToday(s.timestamp)).length >= 2,
+          weekly: sessions.length >= 10,
+          monthly: sessions.length >= 40
+      };
+  }
+
+  isToday(timestamp) {
+      const today = new Date();
+      const sessionDate = new Date(timestamp);
+      return today.toDateString() === sessionDate.toDateString();
+  }
+
+  getEmptyAnalytics() {
+      return {
+          totalTime: 0,
+          sessionCount: 0,
+          averageSession: 0,
+          subjectBreakdown: {},
+          dailyProgress: new Array(7).fill(0),
+          productivity: 0,
+          goals: { daily: false, weekly: false, monthly: false }
+      };
+  }
+
+  async exportStudyData(sendResponse) {
+      try {
+          const { studyData } = await chrome.storage.local.get(['studyData']);
+          
+          if (!studyData) {
+              sendResponse({ success: false, error: 'No study data found' });
+              return;
+          }
+
+          const exportData = {
+              exportedAt: new Date().toISOString(),
+              version: '2.0',
+              data: studyData,
+              summary: {
+                  totalSessions: studyData.sessions?.length || 0,
+                  totalTime: studyData.sessions?.reduce((sum, s) => sum + s.duration, 0) || 0,
+                  coursesTracked: studyData.courses?.length || 0,
+                  currentStreak: studyData.streak || 0
+              }
+          };
+
+          // Create downloadable blob
+          const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
+              type: 'application/json' 
+          });
+          
+          const url = URL.createObjectURL(blob);
+          const filename = `studysync-data-${new Date().toISOString().split('T')[0]}.json`;
+          
+          // Trigger download
+          await chrome.downloads.download({
+              url: url,
+              filename: filename,
+              saveAs: true
+          });
+
+          sendResponse({ success: true, filename });
+      } catch (error) {
+          console.error('Error exporting data:', error);
+          sendResponse({ success: false, error: error.message });
+      }
+  }
+
+  async handleAlarm(alarm) {
+      if (alarm.name === 'studyReminder') {
+          const { studyReminder } = await chrome.storage.local.get(['studyReminder']);
+          
+          if (studyReminder && studyReminder.active) {
+              // Show notification
+              chrome.notifications.create({
+                  type: 'basic',
+                  iconUrl: 'icon48.png',
+                  title: 'StudySync Reminder',
+                  message: studyReminder.message || 'Time for your study session!',
+                  buttons: [
+                      { title: 'Start Session' },
+                      { title: 'Snooze 10min' }
+                  ]
+              });
+          }
+      }
+  }
+
+  async handleInstallation(details) {
+      if (details.reason === 'install') {
+          console.log('StudySync Enhanced installed');
+          
+          // Set default settings
+          await chrome.storage.local.set({
+              version: '2.0',
+              installedAt: Date.now(),
+              settings: {
+                  theme: 'light',
+                  notifications: true,
+                  autoSync: true,
+                  reminderEnabled: false
+              }
+          });
+          
+          // Open welcome page
+          chrome.tabs.create({
+              url: chrome.runtime.getURL('welcome.html')
+          });
+      }
   }
 }
 
-// Handle alarms for scheduled tasks
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  console.log('Alarm triggered:', alarm.name);
-  
-  try {
-    switch (alarm.name) {
-      case 'syncData':
-        await syncUserData();
-        break;
-      case 'cleanup':
-        await performCleanup();
-        break;
-    }
-  } catch (error) {
-    console.error(`Alarm ${alarm.name} failed:`, error);
-  }
-});
-
-// Sync user data periodically
-async function syncUserData() {
-  try {
-    const userData = await getUserDataFromFirestore();
-    if (userData) {
-      await chrome.storage.local.set({ lastSync: Date.now() });
-      console.log('Data sync completed');
-    }
-  } catch (error) {
-    console.error('Data sync failed:', error);
-  }
-}
-
-// Cleanup function
-async function performCleanup() {
-  try {
-    const { installTime } = await chrome.storage.local.get(['installTime']);
-    const daysSinceInstall = (Date.now() - installTime) / (1000 * 60 * 60 * 24);
-    
-    if (daysSinceInstall > 30) {
-      console.log('Performing cleanup for old installation');
-      // Add cleanup logic here
-    }
-  } catch (error) {
-    console.error('Cleanup failed:', error);
-  }
-}
-
-// Set up periodic alarms
-chrome.alarms.create('syncData', { periodInMinutes: 60 });
-chrome.alarms.create('cleanup', { periodInMinutes: 1440 }); // Daily
-
-// Export utilities for testing in development
-if (ExtensionEnv.isDevelopment()) {
-  globalThis.backgroundUtils = {
-    ExtensionEnv,
-    handleGoogleLogin,
-    saveUserDataToFirestore,
-    getUserDataFromFirestore
-  };
-}
+// Initialize the background service
+new StudySyncBackground();
 
