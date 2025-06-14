@@ -465,13 +465,17 @@ class StudySyncApp {
   updateStreak() {
       const today = new Date().toDateString();
       const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toDateString();
-      
+
       const todaySessions = this.studyData.sessions.filter(s => s.date === today);
       const yesterdaySessions = this.studyData.sessions.filter(s => s.date === yesterday);
-      
+
       if (todaySessions.length > 0) {
-          if (yesterdaySessions.length > 0 || this.studyData.streak === 0) {
+          if (yesterdaySessions.length > 0) {
+              // Continue streak from yesterday
               this.studyData.streak = (this.studyData.streak || 0) + 1;
+          } else {
+              // Reset streak since there was a break yesterday
+              this.studyData.streak = 1;
           }
       }
   }
