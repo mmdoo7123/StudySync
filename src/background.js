@@ -1,613 +1,990 @@
-// StudySync Enhanced Background Script
-// Version 2.0 - Professional Service Worker
-
-class StudySyncBackground {
-  constructor() {
-      this.init();
-  }
-
-  init() {
-      console.log('StudySync Enhanced Background v2.0 - Starting...');
-      
-      // Setup message listeners
-      chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-          this.handleMessage(request, sender, sendResponse);
-          return true; // Keep message channel open for async responses
-      });
-
-      // Setup installation listener
-      chrome.runtime.onInstalled.addListener((details) => {
-          this.handleInstallation(details);
-      });
-
-      // Setup alarm listeners for notifications
-      chrome.alarms.onAlarm.addListener((alarm) => {
-          this.handleAlarm(alarm);
-      });
-
-      console.log('StudySync Enhanced Background - Ready!');
-  }
-
-  async handleMessage(request, sender, sendResponse) {
-      try {
-          switch (request.action) {
-              case 'authenticate':
-                  await this.handleAuthentication(sendResponse);
-                  break;
-              
-              case 'scrapeBrightspace':
-                  await this.handleBrightspaceScraping(sendResponse);
-                  break;
-              
-              case 'setStudyReminder':
-                  await this.setStudyReminder(request.data, sendResponse);
-                  break;
-              
-              case 'getAnalytics':
-                  await this.getAnalytics(request.period, sendResponse);
-                  break;
-              
-              case 'exportData':
-                  await this.exportStudyData(sendResponse);
-                  break;
-              
-              default:
-                  sendResponse({ success: false, error: 'Unknown action' });
-          }
-      } catch (error) {
-          console.error('Background message error:', error);
-          sendResponse({ success: false, error: error.message });
-      }
-  }
-
-  async handleAuthentication(sendResponse) {
-      try {
-          console.log('Starting Google OAuth authentication...');
-          
-          // Get OAuth token using Chrome Identity API
-          const token = await new Promise((resolve, reject) => {
-              chrome.identity.getAuthToken({ interactive: true }, (token) => {
-                  if (chrome.runtime.lastError) {
-                      reject(new Error(chrome.runtime.lastError.message));
-                  } else {
-                      resolve(token);
-                  }
-              });
-          });
-
-          if (!token) {
-              throw new Error('Failed to get authentication token');
-          }
-
-          // Get user info from Google API
-          const userResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${token}`);
-          
-          if (!userResponse.ok) {
-              throw new Error('Failed to fetch user information');
-          }
-
-          const userData = await userResponse.json();
-          
-          const user = {
-              id: userData.id,
-              email: userData.email,
-              name: userData.name,
-              picture: userData.picture,
-              token: token,
-              authenticatedAt: Date.now()
-          };
-
-          console.log('Authentication successful:', user.email);
-          sendResponse({ success: true, user });
-
-      } catch (error) {
-          console.error('Authentication error:', error);
-          sendResponse({ success: false, error: error.message });
-      }
-  }
-
-  async handleBrightspaceScraping(sendResponse) {
-      try {
-          console.log('Starting Brightspace data scraping...');
-
-          // Find or create Brightspace tab
-          const brightspaceTab = await this.findOrCreateBrightspaceTab();
-          
-          if (!brightspaceTab) {
-              throw new Error('Could not access Brightspace. Please log in first.');
-          }
-
-          // Inject and execute scraper
-          const results = await chrome.scripting.executeScript({
-              target: { tabId: brightspaceTab.id },
-              func: this.brightspaceScraper
-          });
-
-          if (!results || !results[0]) {
-              throw new Error('Failed to execute scraper script');
-          }
-
-          const scrapedData = results[0].result;
-          
-          if (!scrapedData.success) {
-              throw new Error(scrapedData.error || 'Scraping failed');
-          }
-
-          console.log(`Successfully scraped ${scrapedData.courses.length} courses`);
-          
-          // Enhance course data with additional information
-          const enhancedCourses = await this.enhanceCourseData(scrapedData.courses);
-          
-          sendResponse({ 
-              success: true, 
-              courses: enhancedCourses,
-              scrapedAt: Date.now()
-          });
-
-      } catch (error) {
-          console.error('Brightspace scraping error:', error);
-          sendResponse({ success: false, error: error.message });
-      }
-  }
-
-  async findOrCreateBrightspaceTab() {
-      try {
-          // First, try to find existing Brightspace tab
-          const tabs = await chrome.tabs.query({});
-          const brightspaceTab = tabs.find(tab => 
-              tab.url && tab.url.includes('brightspace.uottawa.ca')
-          );
-
-          if (brightspaceTab) {
-              // Activate existing tab
-              await chrome.tabs.update(brightspaceTab.id, { active: true });
-              await chrome.windows.update(brightspaceTab.windowId, { focused: true });
-              return brightspaceTab;
-          }
-
-          // Create new tab if none exists
-          const newTab = await chrome.tabs.create({
-              url: 'https://brightspace.uottawa.ca/d2l/home',
-              active: true
-          });
-
-          // Wait for tab to load
-          await new Promise((resolve) => {
-              const listener = (tabId, changeInfo) => {
-                  if (tabId === newTab.id && changeInfo.status === 'complete') {
-                      chrome.tabs.onUpdated.removeListener(listener);
-                      resolve();
-                  }
-              };
-              chrome.tabs.onUpdated.addListener(listener);
-          });
-
-          return newTab;
-
-      } catch (error) {
-          console.error('Error finding/creating Brightspace tab:', error);
-          return null;
-      }
-  }
-
-  // Enhanced Brightspace scraper function
-  brightspaceScraper() {
-      try {
-          console.log('Executing Brightspace scraper...');
-
-          // Check if we're on the right page
-          if (!window.location.href.includes('brightspace.uottawa.ca')) {
-              return { success: false, error: 'Not on Brightspace domain' };
-          }
-
-          // Wait for page to be fully loaded
-          if (document.readyState !== 'complete') {
-              return { success: false, error: 'Page still loading' };
-          }
-
-          const courses = [];
-
-          // Try multiple selectors for course cards
-          const courseSelectors = [
-              '.d2l-card',
-              '.d2l-course-tile',
-              '[data-automation-id="course-tile"]',
-              '.d2l-enrollment-card',
-              '.d2l-widget-content'
-          ];
-
-          let courseElements = [];
-          
-          for (const selector of courseSelectors) {
-              courseElements = document.querySelectorAll(selector);
-              if (courseElements.length > 0) {
-                  console.log(`Found ${courseElements.length} courses using selector: ${selector}`);
-                  break;
-              }
-          }
-
-          if (courseElements.length === 0) {
-              // Try alternative approach - look for course links
-              const courseLinks = document.querySelectorAll('a[href*="/d2l/le/content/"]');
-              if (courseLinks.length > 0) {
-                  courseLinks.forEach((link, index) => {
-                      const courseName = link.textContent.trim();
-                      if (courseName && courseName.length > 3) {
-                          courses.push({
-                              id: `course_${index}`,
-                              name: courseName,
-                              code: this.extractCourseCode(courseName),
-                              url: link.href,
-                              lastAccessed: null,
-                              isActive: true
-                          });
-                      }
-                  });
-              }
-          } else {
-              // Process course cards
-              courseElements.forEach((element, index) => {
-                  try {
-                      const courseData = this.extractCourseInfo(element, index);
-                      if (courseData) {
-                          courses.push(courseData);
-                      }
-                  } catch (error) {
-                      console.warn(`Error processing course element ${index}:`, error);
-                  }
-              });
-          }
-
-          // Remove duplicates
-          const uniqueCourses = courses.filter((course, index, self) => 
-              index === self.findIndex(c => c.name === course.name)
-          );
-
-          console.log(`Scraped ${uniqueCourses.length} unique courses`);
-
-          return { 
-              success: true, 
-              courses: uniqueCourses,
-              timestamp: Date.now(),
-              url: window.location.href
-          };
-
-      } catch (error) {
-          console.error('Scraper execution error:', error);
-          return { success: false, error: error.message };
-      }
-  }
-
-  extractCourseInfo(element, index) {
-      // Try to extract course name
-      const nameSelectors = [
-          '.d2l-card-header',
-          '.d2l-course-tile-title',
-          '.d2l-heading',
-          'h2', 'h3', 'h4',
-          '[data-automation-id="course-title"]'
-      ];
-
-      let courseName = '';
-      for (const selector of nameSelectors) {
-          const nameEl = element.querySelector(selector);
-          if (nameEl && nameEl.textContent.trim()) {
-              courseName = nameEl.textContent.trim();
-              break;
-          }
-      }
-
-      // Try to extract course URL
-      let courseUrl = '';
-      const linkEl = element.querySelector('a[href*="/d2l/"]') || element.closest('a');
-      if (linkEl && linkEl.href) {
-          courseUrl = linkEl.href;
-      }
-
-      // Try to extract additional info
-      const codeMatch = courseName.match(/([A-Z]{3,4}\s*\d{4})/);
-      const courseCode = codeMatch ? codeMatch[1] : '';
-
-      if (courseName && courseName.length > 3) {
-          return {
-              id: `course_${index}_${Date.now()}`,
-              name: courseName,
-              code: courseCode,
-              url: courseUrl,
-              lastAccessed: this.extractLastAccessed(element),
-              isActive: true,
-              scrapedAt: Date.now()
-          };
-      }
-
-      return null;
-  }
-
-  extractCourseCode(courseName) {
-      const codeMatch = courseName.match(/([A-Z]{3,4}\s*\d{4})/);
-      return codeMatch ? codeMatch[1] : '';
-  }
-
-  extractLastAccessed(element) {
-      const timeSelectors = [
-          '.d2l-card-footer time',
-          '.d2l-last-accessed',
-          '[data-automation-id="last-accessed"]'
-      ];
-
-      for (const selector of timeSelectors) {
-          const timeEl = element.querySelector(selector);
-          if (timeEl) {
-              return timeEl.textContent.trim();
-          }
-      }
-      return null;
-  }
-
-  async enhanceCourseData(courses) {
-      // Add additional metadata and processing
-      return courses.map(course => ({
-          ...course,
-          semester: this.detectSemester(),
-          year: new Date().getFullYear(),
-          category: this.categorizeCourse(course.name),
-          priority: this.calculatePriority(course),
-          studyTime: 0,
-          lastStudied: null,
-          goals: [],
-          assignments: [],
-          schedule: null
-      }));
-  }
-
-  detectSemester() {
-      const month = new Date().getMonth();
-      if (month >= 8 || month <= 0) return 'Fall';
-      if (month >= 1 && month <= 4) return 'Winter';
-      return 'Summer';
-  }
-
-  categorizeCourse(courseName) {
-      const categories = {
-          'Computer Science': ['CSI', 'SEG', 'CEG', 'ITI'],
-          'Mathematics': ['MAT', 'STA'],
-          'Engineering': ['ELG', 'MCG', 'CVG'],
-          'Science': ['PHY', 'CHM', 'BIO'],
-          'Business': ['ADM', 'ECO'],
-          'Languages': ['FRA', 'ESP', 'GER']
-      };
-
-      for (const [category, codes] of Object.entries(categories)) {
-          if (codes.some(code => courseName.includes(code))) {
-              return category;
-          }
-      }
-      return 'Other';
-  }
-
-  calculatePriority(course) {
-      // Simple priority calculation based on course level
-      const codeMatch = course.code.match(/\d{4}/);
-      if (codeMatch) {
-          const level = parseInt(codeMatch[0]);
-          if (level >= 4000) return 'High';
-          if (level >= 3000) return 'Medium';
-          return 'Low';
-      }
-      return 'Medium';
-  }
-
-  async setStudyReminder(data, sendResponse) {
-      try {
-          const { time, message, recurring } = data;
-          
-          // Create alarm
-          await chrome.alarms.create('studyReminder', {
-              when: time,
-              periodInMinutes: recurring ? 1440 : undefined // Daily if recurring
-          });
-
-          // Store reminder data
-          await chrome.storage.local.set({
-              studyReminder: { time, message, recurring, active: true }
-          });
-
-          sendResponse({ success: true });
-      } catch (error) {
-          console.error('Error setting study reminder:', error);
-          sendResponse({ success: false, error: error.message });
-      }
-  }
-
-  async getAnalytics(period, sendResponse) {
-      try {
-          const { studyData } = await chrome.storage.local.get(['studyData']);
-          
-          if (!studyData || !studyData.sessions) {
-              sendResponse({ success: true, analytics: this.getEmptyAnalytics() });
-              return;
-          }
-
-          const analytics = this.calculateAnalytics(studyData.sessions, period);
-          sendResponse({ success: true, analytics });
-      } catch (error) {
-          console.error('Error getting analytics:', error);
-          sendResponse({ success: false, error: error.message });
-      }
-  }
-
-  calculateAnalytics(sessions, period) {
-      const now = Date.now();
-      const periodMs = {
-          'week': 7 * 24 * 60 * 60 * 1000,
-          'month': 30 * 24 * 60 * 60 * 1000,
-          'semester': 120 * 24 * 60 * 60 * 1000
-      };
-
-      const cutoff = now - (periodMs[period] || periodMs.week);
-      const filteredSessions = sessions.filter(s => s.timestamp >= cutoff);
-
-      return {
-          totalTime: filteredSessions.reduce((sum, s) => sum + s.duration, 0),
-          sessionCount: filteredSessions.length,
-          averageSession: filteredSessions.length > 0 ? 
-              filteredSessions.reduce((sum, s) => sum + s.duration, 0) / filteredSessions.length : 0,
-          subjectBreakdown: this.getSubjectBreakdown(filteredSessions),
-          dailyProgress: this.getDailyProgress(filteredSessions, period),
-          productivity: this.calculateProductivity(filteredSessions),
-          goals: this.getGoalProgress(filteredSessions)
-      };
-  }
-
-  getSubjectBreakdown(sessions) {
-      const breakdown = {};
-      sessions.forEach(session => {
-          breakdown[session.subject] = (breakdown[session.subject] || 0) + session.duration;
-      });
-      return breakdown;
-  }
-
-  getDailyProgress(sessions, period) {
-      const days = period === 'week' ? 7 : period === 'month' ? 30 : 120;
-      const progress = new Array(days).fill(0);
-      
-      sessions.forEach(session => {
-          const dayIndex = Math.floor((Date.now() - session.timestamp) / (24 * 60 * 60 * 1000));
-          if (dayIndex < days) {
-              progress[days - 1 - dayIndex] += session.duration;
-          }
-      });
-      
-      return progress;
-  }
-
-  calculateProductivity(sessions) {
-      if (sessions.length === 0) return 0;
-      
-      const totalTime = sessions.reduce((sum, s) => sum + s.duration, 0);
-      const averageSession = totalTime / sessions.length;
-      
-      // Productivity score based on session length and consistency
-      const consistencyScore = sessions.length / 30; // Sessions per month
-      const lengthScore = Math.min(averageSession / 60, 1); // Normalize to 1 hour
-      
-      return Math.min((consistencyScore + lengthScore) / 2, 1) * 100;
-  }
-
-  getGoalProgress(sessions) {
-      // This would integrate with actual goal data
-      return {
-          daily: sessions.filter(s => this.isToday(s.timestamp)).length >= 2,
-          weekly: sessions.length >= 10,
-          monthly: sessions.length >= 40
-      };
-  }
-
-  isToday(timestamp) {
-      const today = new Date();
-      const sessionDate = new Date(timestamp);
-      return today.toDateString() === sessionDate.toDateString();
-  }
-
-  getEmptyAnalytics() {
-      return {
-          totalTime: 0,
-          sessionCount: 0,
-          averageSession: 0,
-          subjectBreakdown: {},
-          dailyProgress: new Array(7).fill(0),
-          productivity: 0,
-          goals: { daily: false, weekly: false, monthly: false }
-      };
-  }
-
-  async exportStudyData(sendResponse) {
-      try {
-          const { studyData } = await chrome.storage.local.get(['studyData']);
-          
-          if (!studyData) {
-              sendResponse({ success: false, error: 'No study data found' });
-              return;
-          }
-
-          const exportData = {
-              exportedAt: new Date().toISOString(),
-              version: '2.0',
-              data: studyData,
-              summary: {
-                  totalSessions: studyData.sessions?.length || 0,
-                  totalTime: studyData.sessions?.reduce((sum, s) => sum + s.duration, 0) || 0,
-                  coursesTracked: studyData.courses?.length || 0,
-                  currentStreak: studyData.streak || 0
-              }
-          };
-
-          // Create downloadable blob
-          const blob = new Blob([JSON.stringify(exportData, null, 2)], { 
-              type: 'application/json' 
-          });
-          
-          const url = URL.createObjectURL(blob);
-          const filename = `studysync-data-${new Date().toISOString().split('T')[0]}.json`;
-          
-          // Trigger download
-          await chrome.downloads.download({
-              url: url,
-              filename: filename,
-              saveAs: true
-          });
-
-          sendResponse({ success: true, filename });
-      } catch (error) {
-          console.error('Error exporting data:', error);
-          sendResponse({ success: false, error: error.message });
-      }
-  }
-
-  async handleAlarm(alarm) {
-      if (alarm.name === 'studyReminder') {
-          const { studyReminder } = await chrome.storage.local.get(['studyReminder']);
-          
-          if (studyReminder && studyReminder.active) {
-              // Show notification
-              chrome.notifications.create({
-                  type: 'basic',
-                  iconUrl: 'icon48.png',
-                  title: 'StudySync Reminder',
-                  message: studyReminder.message || 'Time for your study session!',
-                  buttons: [
-                      { title: 'Start Session' },
-                      { title: 'Snooze 10min' }
-                  ]
-              });
-          }
-      }
-  }
-
-  async handleInstallation(details) {
-      if (details.reason === 'install') {
-          console.log('StudySync Enhanced installed');
-          
-          // Set default settings
-          await chrome.storage.local.set({
-              version: '2.0',
-              installedAt: Date.now(),
-              settings: {
-                  theme: 'light',
-                  notifications: true,
-                  autoSync: true,
-                  reminderEnabled: false
-              }
-          });
-          
-          // Open welcome page
-          chrome.tabs.create({
-              url: chrome.runtime.getURL('welcome.html')
-          });
-      }
-  }
+// StudySync Enhanced Background Script - Fixed Version
+// Version 3.0 - Secure Session Management & Deadline Processing
+
+// Deadline Processor Class - Inline for service worker compatibility
+class DeadlineProcessor {
+    constructor() {
+        this.categories = {
+            assignment: {
+                keywords: ['assignment', 'hw', 'homework', 'project', 'report', 'essay', 'submission', 'submit', 'lab'],
+                icon: '📄'
+            },
+            quiz: {
+                keywords: ['quiz', 'test', 'midterm', 'assessment', 'evaluation'],
+                icon: '🧪'
+            },
+            exam: {
+                keywords: ['exam', 'final', 'examination', 'finals'],
+                icon: '📅'
+            }
+        };
+    }
+
+    categorizeDeadline(title, description = '') {
+        const text = (title + ' ' + description).toLowerCase();
+        
+        for (const [categoryName, categoryData] of Object.entries(this.categories)) {
+            for (const keyword of categoryData.keywords) {
+                if (text.includes(keyword)) {
+                    return {
+                        type: categoryName,
+                        icon: categoryData.icon,
+                        confidence: this.calculateConfidence(text, keyword)
+                    };
+                }
+            }
+        }
+        
+        return {
+            type: 'assignment',
+            icon: '📄',
+            confidence: 0.3
+        };
+    }
+
+    calculateConfidence(text, keyword) {
+        const words = text.split(/\s+/);
+        const keywordIndex = words.findIndex(word => word.includes(keyword));
+        
+        if (keywordIndex === -1) return 0.5;
+        if (keywordIndex < 3) return 0.9;
+        if (keywordIndex < 6) return 0.7;
+        return 0.5;
+    }
+
+    normalizeDeadline(rawText) {
+        const category = this.categorizeDeadline(rawText);
+        const dateMatch = this.extractDate(rawText);
+        const title = this.extractTitle(rawText);
+
+        return {
+            type: category.type,
+            title: title,
+            dueDate: dateMatch ? dateMatch.toISOString().split('T')[0] : null,
+            rawText: rawText,
+            icon: category.icon,
+            confidence: category.confidence,
+            extractedAt: new Date().toISOString()
+        };
+    }
+
+    extractDate(text) {
+        const datePatterns = [
+            /(\w+\s+\d{1,2},\s+\d{4})/g,
+            /(\d{1,2}\/\d{1,2}\/\d{4})/g,
+            /(\d{4}-\d{2}-\d{2})/g,
+            /(\w+\s+\d{1,2})/g
+        ];
+
+        for (const pattern of datePatterns) {
+            const match = text.match(pattern);
+            if (match) {
+                const dateStr = match[0];
+                const parsedDate = new Date(dateStr);
+                if (!isNaN(parsedDate.getTime())) {
+                    return parsedDate;
+                }
+            }
+        }
+        return null;
+    }
+
+    extractTitle(text) {
+        let title = text.replace(/^(due|deadline|assignment|quiz|exam):\s*/i, '');
+        title = title.replace(/\s*(due|deadline)\s*:.*$/i, '');
+        title = title.replace(/\s*-\s*\w+\s+\d{1,2}(,\s+\d{4})?.*$/i, '');
+        title = title.replace(/\s*\d{1,2}\/\d{1,2}\/\d{4}.*$/i, '');
+        return title.trim();
+    }
+
+    processDeadlines(rawDeadlines) {
+        return rawDeadlines
+            .filter(deadline => deadline && deadline.trim().length > 0)
+            .map(deadline => this.normalizeDeadline(deadline))
+            .sort((a, b) => {
+                if (a.dueDate && b.dueDate) {
+                    return new Date(a.dueDate) - new Date(b.dueDate);
+                }
+                if (a.dueDate && !b.dueDate) return -1;
+                if (!a.dueDate && b.dueDate) return 1;
+                
+                const typePriority = { exam: 3, quiz: 2, assignment: 1 };
+                return (typePriority[b.type] || 0) - (typePriority[a.type] || 0);
+            });
+    }
 }
 
-// Initialize the background service
+// Change Detector Class - Inline for service worker compatibility
+class ChangeDetector {
+    constructor() {
+        this.storageKey = 'deadlineSnapshots';
+    }
+
+    createHash(deadlines) {
+        const sortedData = deadlines
+            .map(d => `${d.type}:${d.title}:${d.dueDate}`)
+            .sort()
+            .join('|');
+        
+        let hash = 0;
+        for (let i = 0; i < sortedData.length; i++) {
+            const char = sortedData.charCodeAt(i);
+            hash = ((hash << 5) - hash) + char;
+            hash = hash & hash;
+        }
+        return hash.toString();
+    }
+
+    async detectChanges(courseId, currentDeadlines) {
+        try {
+            const snapshots = await this.getStoredSnapshots();
+            const previousSnapshot = snapshots[courseId];
+            const currentHash = this.createHash(currentDeadlines);
+
+            if (!previousSnapshot) {
+                await this.saveSnapshot(courseId, currentDeadlines, currentHash);
+                return {
+                    hasChanges: true,
+                    isFirstScrape: true,
+                    added: currentDeadlines,
+                    removed: [],
+                    modified: []
+                };
+            }
+
+            if (previousSnapshot.hash === currentHash) {
+                return {
+                    hasChanges: false,
+                    isFirstScrape: false,
+                    added: [],
+                    removed: [],
+                    modified: []
+                };
+            }
+
+            const changes = this.compareDeadlines(previousSnapshot.deadlines, currentDeadlines);
+            await this.saveSnapshot(courseId, currentDeadlines, currentHash);
+
+            return {
+                hasChanges: true,
+                isFirstScrape: false,
+                ...changes
+            };
+
+        } catch (error) {
+            console.error('Error detecting changes:', error);
+            return {
+                hasChanges: false,
+                error: error.message
+            };
+        }
+    }
+
+    compareDeadlines(oldDeadlines, newDeadlines) {
+        const added = [];
+        const removed = [];
+        const modified = [];
+
+        const oldMap = new Map(oldDeadlines.map(d => [`${d.title}:${d.type}`, d]));
+        const newMap = new Map(newDeadlines.map(d => [`${d.title}:${d.type}`, d]));
+
+        for (const [key, deadline] of newMap) {
+            if (!oldMap.has(key)) {
+                added.push(deadline);
+            }
+        }
+
+        for (const [key, oldDeadline] of oldMap) {
+            if (!newMap.has(key)) {
+                removed.push(oldDeadline);
+            } else {
+                const newDeadline = newMap.get(key);
+                if (oldDeadline.dueDate !== newDeadline.dueDate) {
+                    modified.push({
+                        old: oldDeadline,
+                        new: newDeadline
+                    });
+                }
+            }
+        }
+
+        return { added, removed, modified };
+    }
+
+    async getStoredSnapshots() {
+        try {
+            const result = await chrome.storage.local.get([this.storageKey]);
+            return result[this.storageKey] || {};
+        } catch (error) {
+            console.error('Error retrieving snapshots:', error);
+            return {};
+        }
+    }
+
+    async saveSnapshot(courseId, deadlines, hash) {
+        try {
+            const snapshots = await this.getStoredSnapshots();
+            snapshots[courseId] = {
+                deadlines: deadlines,
+                hash: hash,
+                timestamp: Date.now()
+            };
+            
+            await chrome.storage.local.set({ [this.storageKey]: snapshots });
+            console.log(`Saved snapshot for course ${courseId}`);
+        } catch (error) {
+            console.error('Error saving snapshot:', error);
+        }
+    }
+}
+
+function getbrightspaceScraperFunction() {
+    return async function() {
+        function extractCourseInfo(element, index) {
+            // Skip elements that are clearly not courses
+            const text = element.textContent.trim();
+            if (text.match(/CDATA|function|javascript:|loading|copyright|do not remove|bienvenue|welcome|service|support|©|d21|flex|scroll|body|footer|head|html|script/i)) {
+                return null;
+            }
+            
+            // Skip elements with no visible content
+            if (text.length < 10) return null;
+            
+            // Extract course name - multiple fallbacks
+            let courseName = '';
+            const nameSelectors = [
+                'h1', 'h2', 'h3', 'h4', 
+                '.d2l-heading-2', '.d2l-heading-3', 
+                '[data-testid="course-name"]',
+                '.d2l-course-name', '.course-name'
+            ];
+            
+            for (const selector of nameSelectors) {
+                const nameEl = element.querySelector(selector);
+                if (nameEl && nameEl.textContent.trim()) {
+                    courseName = nameEl.textContent.trim();
+                    break;
+                }
+            }
+            
+            if (!courseName) {
+                // Fallback to first meaningful text
+                courseName = text.substring(0, 50).replace(/\s{2,}/g, ' ').trim();
+            }
+            
+            // Skip if name looks like code
+            if (courseName.match(/[{};()=*\/]/)) return null;
+            const nonCoursePhrases = [
+                'anytime',
+                'for assistance',
+                'service desk',
+                'help',
+                'support',
+                'welcome',
+                'bienvenue'
+            ];
+
+            const lowerName = courseName.toLowerCase();
+            for (const phrase of nonCoursePhrases) {
+                if (lowerName.includes(phrase)) {
+                    console.log(`Skipping non-course element: ${courseName}`);
+                    return null;
+                }
+            }
+            // Extract course URL and ID
+            let courseUrl = '';
+            let courseId = '';
+            const linkEl = element.querySelector('a[href*="/d2l/"]'); // More generic selector
+            
+            if (linkEl && linkEl.href) {
+                courseUrl = linkEl.href;
+                // Try multiple patterns for course ID extraction
+                const idPatterns = [
+                    /\/d2l\/home\/(\d+)/,
+                    /\/d2l\/le\/content\/(\d+)/,
+                    /\/d2l\/lp\/ouHome\/(\d+)/,
+                    /[&?]ou=(\d+)/  // Additional pattern for ID in query params
+                ];
+                
+                for (const pattern of idPatterns) {
+                    const idMatch = courseUrl.match(pattern);
+                    if (idMatch) {
+                        courseId = idMatch[1];
+                        break;
+                    }
+                }
+            }
+
+            // Extract course code from name
+            let courseCode = '';
+            
+            // Strategy 1: Extract from data attributes
+            const dataCode = element.getAttribute('data-course-code') || 
+                            element.closest('[data-course-code]')?.getAttribute('data-course-code');
+            if (dataCode) {
+                courseCode = dataCode.trim().toUpperCase();
+            }
+            
+            // Strategy 2: Extract from URL
+            if (!courseCode && linkEl && linkEl.href) {
+                const urlPatterns = [
+                    /\/d2l\/home\/(\d+)_([A-Z]{2,4}\d{3,4}[A-Z]?)/i,
+                    /[&?]code=([A-Z]{2,4}\d{3,4}[A-Z]?)/i,
+                    /[&?]course=([A-Z]{2,4}\d{3,4}[A-Z]?)/i
+                ];
+                
+                for (const pattern of urlPatterns) {
+                    const match = linkEl.href.match(pattern);
+                    if (match && match[1]) {
+                        courseCode = match[1].toUpperCase();
+                        break;
+                    }
+                }
+            }
+            
+            // Strategy 3: Extract from element ID/class
+            if (!courseCode) {
+                const idPattern = /([A-Z]{2,4}\d{3,4}[A-Z]?)/i;
+                const idMatch = element.id.match(idPattern) || 
+                                Array.from(element.classList).find(c => c.match(idPattern))?.match(idPattern);
+                if (idMatch) {
+                    courseCode = idMatch[1].toUpperCase();
+                }
+            }
+            
+            // Strategy 4: Extract from text content patterns
+            if (!courseCode) {
+                const textPatterns = [
+                    // Standard pattern: ABC 1234 or ABC1234
+                    /([A-Z]{2,4}\s?\d{3,4}[A-Z]?)/i,
+                        /([A-Z]{2,4}-\d{3,4}[A-Z]?)/i,
+                        /(?:course|code|id)[:\s-]+([A-Z]{2,4}\d{3,4}[A-Z]?)/i
+                    ];
+                
+                for (const pattern of textPatterns) {
+                    const match = text.match(pattern);
+                    if (match && match[1]) {
+                        // Reconstruct code from match groups
+                        courseCode = match.slice(1).join('').toUpperCase();
+                        break;
+                    }
+                }
+            }
+            // After all extraction attempts, add a fallback
+            if (!courseCode && courseName) {
+                // Try to extract from course name
+                const codeMatch = courseName.match(/([A-Z]{2,4}\s?\d{3,4}[A-Z]?)/);
+                if (codeMatch) {
+                    courseCode = codeMatch[1].replace(/\s+/, '').toUpperCase();
+                }
+            }
+
+            // Extract deadlines with more comprehensive selectors
+            const deadlines = [];
+            const deadlineSelectors = [
+                '.d2l-activity-deadline', 
+                '[data-testid="activity-deadline"]',
+                '.d2l-date-text', 
+                '.d2l-datetime'
+            ];
+            
+            deadlineSelectors.forEach(selector => {
+                element.querySelectorAll(selector).forEach(el => {
+                    const text = el.textContent.trim();
+                    if (text) deadlines.push(text);
+                });
+            });
+
+            return {
+                name: courseName,
+                code: courseCode,
+                url: courseUrl,
+                deadlines: deadlines,
+                elementIndex: index,
+                courseId: courseId
+            };
+        }
+        
+        
+         try {
+            console.log('Scraper: Executing focused Brightspace scraper...');
+            
+            // Wait for courses to load
+            await new Promise(resolve => {
+                if (document.readyState === 'complete') {
+                    resolve();
+                } else {
+                    document.addEventListener('DOMContentLoaded', resolve);
+                    setTimeout(resolve, 3000);
+                }
+            });
+            
+            // Find course containers
+            const commonContainers = [
+                '#d2l_my_courses_widget',
+                '.d2l-my-courses-container',
+                '.d2l-course-widget',
+                '#course-widget',
+                'd2l-my-courses',
+                'd2l-course-tile-grid',
+                '.d2l-course-homepage',
+                '.d2l-course-list' 
+            ];
+            
+            let courseElements = [];
+            
+            for (const containerSelector of commonContainers) {
+                const container = document.querySelector(containerSelector);
+                if (container) {
+                    console.log(`Found course container: ${containerSelector}`);
+                    courseElements = Array.from(container.querySelectorAll(
+                        '[data-testid="course-tile"], .d2l-course-tile, .d2l-enrollment-card'
+                    ));
+                    break;
+                }
+            }
+            
+            // Search whole document if no container found
+            if (courseElements.length === 0) {
+                console.log('No course container found, searching entire document');
+                const courseSelectors = [
+                    '[data-testid="course-tile"]',
+                    '.d2l-course-tile',
+                    '.d2l-enrollment-card',
+                    '.d2l-course-card',
+                    '.course-tile',
+                    '.d2l-my-courses-course-name',
+                    '.d2l-course-link',
+                    'd2l-enrollment-card', 
+                    'd2l-course-tile' 
+                ];
+                
+                for (const selector of courseSelectors) {
+                    const elements = Array.from(document.querySelectorAll(selector));
+                    courseElements = courseElements.concat(elements);
+                }
+            }
+            
+            console.log(`Found ${courseElements.length} potential course tiles`);
+            
+            // Process all course elements
+            const courses = [];
+            courseElements.forEach((element, index) => {
+                try {
+                    const courseData = extractCourseInfo(element, index);
+                    if (courseData) {
+                        console.log(`Found course: ${courseData.name}`);
+                        courses.push(courseData);
+                    }
+                } catch (error) {
+                    console.warn(`Error processing element ${index}:`, error);
+                }
+            });
+        
+            // Filter out invalid courses
+            const validCourses = courses.filter(course => 
+                course && 
+                course.courseId && 
+                course.courseId.trim() !== '' &&  // Ensure non-empty course ID
+                course.name && 
+                course.name.trim().length > 3 &&
+                !course.name.match(/CDATA|function|javascript:/i)
+            );
+            // detailed logging for validation failures
+            const invalidCourses = courses.filter(course => 
+                !course ||
+                !course.courseId || 
+                course.courseId.trim() === '' || 
+                !course.name || 
+                course.name.trim().length <= 3 ||
+                course.name.match(/CDATA|function|javascript:/i)
+            );
+            console.log(`Found ${invalidCourses.length} invalid courses`);
+            invalidCourses.forEach((course, index) => {
+                console.log(`Invalid course #${index + 1}:`, course);
+                if (!course.courseId || course.courseId.trim() === '') {
+                    console.log('  Reason: Missing course ID');
+                }
+                if (!course.name || course.name.trim().length <= 3) {
+                    console.log('  Reason: Invalid course name');
+                }
+                if (course.name.match(/CDATA|function|javascript:/i)) {
+                    console.log('  Reason: Invalid name pattern');
+                }
+            });
+
+            // Fallback if no courses found
+            if (validCourses.length === 0) {
+                console.log('No courses found with selectors, trying fallback method...');
+                const allElements = document.querySelectorAll('*');
+                const possibleCourses = [];
+                
+                allElements.forEach(el => {
+                    const text = el.textContent.trim();
+                    if (text.length > 20 && text.length < 200 && 
+                        !text.match(/CDATA|function|javascript:|loading|copyright|do not remove|bienvenue|welcome|service|support|©|d21|flex|scroll|body|footer|head|html|script/i) &&
+                        text.match(/(course|class|subject|module)/i)) {
+                        possibleCourses.push(el);
+                    }
+                });
+                
+                console.log(`Found ${possibleCourses.length} possible course elements`);
+                
+                possibleCourses.forEach((element, index) => {
+                    try {
+                        const courseData = extractCourseInfo(element, index);
+                        if (courseData) {
+                            console.log(`Found course via fallback: ${courseData.name}`);
+                            validCourses.push(courseData);
+                        }
+                    } catch (error) {
+                        console.warn(`Error processing fallback element ${index}:`, error);
+                    }
+                });
+            }
+            
+            return { 
+                success: true, 
+                courses: validCourses,
+                timestamp: Date.now(),
+                url: window.location.href
+            };
+            
+        } catch (error) {
+            console.error('Scraper error:', error);
+            return { success: false, error: error.message };
+        }
+        
+    };
+}
+// Main Background Script Class
+class StudySyncBackground {
+    constructor() {
+        this.brightspaceBaseUrl = 'https://uottawa.brightspace.com';
+        this.sessionData = null;
+        this.deadlineProcessor = new DeadlineProcessor();
+        this.changeDetector = new ChangeDetector();
+        this.syncIntervalMinutes = 60;
+        this.init();
+    }
+
+    init() {
+        console.log('StudySync Enhanced Background v3.0 - Starting...');
+        
+        // Setup message listeners
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            this.handleMessage(request, sender, sendResponse);
+            return true; // Keep message channel open for async responses
+        });
+
+        // Setup installation listener
+        chrome.runtime.onInstalled.addListener((details) => {
+            this.handleInstallation(details);
+        });
+
+        // Setup alarm listeners for notifications
+        chrome.alarms.onAlarm.addListener((alarm) => {
+            this.handleAlarm(alarm);
+        });
+
+        // Load session data on startup
+        this.loadSessionData();
+
+        console.log('StudySync Enhanced Background - Ready!');
+    }
+
+    async loadSessionData() {
+        try {
+            const result = await chrome.storage.local.get(['brightspaceSession']);
+            if (result.brightspaceSession) {
+                this.sessionData = result.brightspaceSession;
+                console.log('Loaded existing Brightspace session data');
+            }
+        } catch (error) {
+            console.error('Error loading session data:', error);
+        }
+    }
+
+    async saveSessionData(sessionData) {
+        try {
+            this.sessionData = {
+                ...sessionData,
+                lastUpdated: Date.now(),
+                expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
+            };
+            
+            await chrome.storage.local.set({ 
+                brightspaceSession: this.sessionData 
+            });
+            
+            console.log('Saved Brightspace session data securely');
+        } catch (error) {
+            console.error('Error saving session data:', error);
+        }
+    }
+
+    isSessionValid() {
+        if (!this.sessionData) return false;
+        if (Date.now() > this.sessionData.expiresAt) {
+            console.log('Session expired, clearing data');
+            this.clearSessionData();
+            return false;
+        }
+        return true;
+    }
+
+    async clearSessionData() {
+        try {
+            this.sessionData = null;
+            await chrome.storage.local.remove(['brightspaceSession']);
+            console.log('Cleared expired session data');
+        } catch (error) {
+            console.error('Error clearing session data:', error);
+        }
+    }
+
+    async handleMessage(request, sender, sendResponse) {
+        try {
+            console.log('Background received message:', request.action);
+            
+            switch (request.action) {
+                case 'authenticate':
+                    await this.handleAuthentication(sendResponse);
+                    break;
+                
+                case 'scrapeBrightspace':
+                    await this.handleBrightspaceScraping(sendResponse);
+                    break;
+                
+                case 'validateSession':
+                    sendResponse({ success: true, valid: this.isSessionValid() });
+                    break;
+                
+                case 'clearSession':
+                    await this.clearSessionData();
+                    sendResponse({ success: true });
+                    break;
+                
+                default:
+                    console.log('Unknown action:', request.action);
+                    sendResponse({ success: false, error: 'Unknown action' });
+            }
+        } catch (error) {
+            console.error('Background message error:', error);
+            sendResponse({ success: false, error: error.message });
+        }
+    }
+
+    async handleAuthentication(sendResponse) {
+        try {
+            console.log('Starting Google OAuth authentication...');
+            
+            // Get OAuth token using Chrome Identity API
+            const token = await new Promise((resolve, reject) => {
+                chrome.identity.getAuthToken({ interactive: true }, (token) => {
+                    if (chrome.runtime.lastError) {
+                        console.error('Auth error:', chrome.runtime.lastError);
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else {
+                        resolve(token);
+                    }
+                });
+            });
+
+            if (!token) {
+                throw new Error('Failed to get authentication token');
+            }
+
+            console.log('Got auth token, fetching user info...');
+
+            // Get user info from Google API
+            const userResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${token}`);
+            
+            if (!userResponse.ok) {
+                throw new Error('Failed to fetch user information');
+            }
+
+            const userData = await userResponse.json();
+            
+            const user = {
+                id: userData.id,
+                email: userData.email,
+                name: userData.name,
+                picture: userData.picture,
+                token: token,
+                authenticatedAt: Date.now()
+            };
+
+            console.log('Authentication successful:', user.email);
+            sendResponse({ success: true, user });
+
+        } catch (error) {
+            console.error('Authentication error:', error);
+            sendResponse({ success: false, error: error.message });
+        }
+    }
+
+    async handleBrightspaceScraping(sendResponse) {
+        try {
+            console.log('Starting Brightspace data scraping...');
+            console.log('Waiting for dynamic content to load...');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const brightspaceTab = await this.findOrCreateBrightspaceTab();
+
+            if (!brightspaceTab) {
+                throw new Error('Could not access Brightspace. Please log in first.');
+            }
+
+            // Try scraping up to 3 times with delays
+            let scrapedData;
+            for (let attempt = 1; attempt <= 5; attempt++) {
+                console.log(`Scraping attempt ${attempt}...`);
+                const results = await chrome.scripting.executeScript({
+                    target: { tabId: brightspaceTab.id },
+                    func: getbrightspaceScraperFunction()
+                });
+
+                if (results && results[0] && results[0].result) {
+                    scrapedData = results[0].result;
+                    if (scrapedData.success && scrapedData.courses.length > 0) {
+                        break; // Exit loop if we got courses
+                    }
+                }
+                
+                // Wait before retrying
+                await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+                // Add check for specific Brightspace element
+                const isLoaded = await chrome.scripting.executeScript({
+                    target: { tabId: brightspaceTab.id },
+                    func: () => {
+                        return !!document.querySelector('d2l-navigation') || 
+                            !!document.querySelector('d2l-course-tile-grid') ||
+                            document.title.includes('Brightspace') ||
+                            window.location.href.includes('brightspace');
+                    }
+                });      
+
+                if (!isLoaded[0].result) {
+                    throw new Error('Brightspace did not load properly');
+                }
+            }
+
+            if (!scrapedData || !scrapedData.success) {
+                throw new Error(scrapedData?.error || 'Scraping failed after 3 attempts');
+            }
+
+            console.log(`Successfully scraped ${scrapedData.courses.length} courses`);
+
+            console.log('Raw course data:', scrapedData.courses);
+
+            // Process deadlines for each course
+            for (const course of scrapedData.courses) {
+                if (course.deadlines && course.deadlines.length > 0) {
+                    const processedDeadlines = this.deadlineProcessor.processDeadlines(course.deadlines);
+                    course.deadlines = processedDeadlines;
+                    console.log(`Processed course: ${course.name} (ID: ${course.courseId})`);
+                    console.log('  Code:', course.code);
+                    console.log('  URL:', course.url);
+                    console.log('  Deadlines:', processedDeadlines);
+                }
+            }
+
+            // Save scraped data for future use
+            await this.saveScrapedData(scrapedData.courses);
+            
+            sendResponse({ 
+                success: true, 
+                courses: scrapedData.courses,
+                scrapedAt: Date.now(),
+                sessionValid: this.isSessionValid()
+            });
+
+        } catch (error) {
+            console.error('Brightspace scraping error:', error);
+            sendResponse({ success: false, error: error.message });
+        }
+    }
+
+    
+    async findOrCreateBrightspaceTab() {
+        try {
+            console.log('[Tab] Finding or creating Brightspace tab...');
+            const targetUrl = `${this.brightspaceBaseUrl}/d2l/home`;
+            
+            // Find existing Brightspace tab
+            const tabs = await chrome.tabs.query({url: '*://*.brightspace.com/*'});
+            let brightspaceTab = tabs.find(tab => 
+                tab.url && (
+                    tab.url.includes(this.brightspaceBaseUrl) ||
+                    tab.url.includes('brightspace.uottawa.ca')
+                )
+            );
+
+            // Check if tab is already at target URL
+            if (brightspaceTab && brightspaceTab.url.includes(targetUrl)) {
+                console.log(`[Tab] Existing tab ${brightspaceTab.id} is already at Brightspace home`);
+                await chrome.tabs.update(brightspaceTab.id, {active: true});
+                await chrome.windows.update(brightspaceTab.windowId, {focused: true});
+                return brightspaceTab;
+            }
+
+            if (brightspaceTab) {
+                console.log(`[Tab] Found existing tab ${brightspaceTab.id}, updating...`);
+                await chrome.tabs.update(brightspaceTab.id, { 
+                    url: targetUrl,
+                    active: true
+                });
+            } else {
+                console.log('[Tab] Creating new tab...');
+                brightspaceTab = await chrome.tabs.create({ 
+                    url: targetUrl,
+                    active: true
+                });
+            }
+
+            // Wait for navigation to complete only if we changed the URL
+            console.log('[Tab] Waiting for navigation to complete...');
+            await new Promise((resolve) => {
+                const listener = (tabId, changeInfo) => {
+                    if (tabId === brightspaceTab.id && changeInfo.status === 'complete') {
+                        chrome.tabs.onUpdated.removeListener(listener);
+                        resolve();
+                    }
+                };
+                chrome.tabs.onUpdated.addListener(listener);
+            });
+            // Verify we're on Brightspace with retries
+            console.log('[Tab] Verifying Brightspace page...');
+            let attempts = 0;
+            while (attempts < 5) {
+                const [isBrightspace, isLoginPage] = await Promise.all([
+                    chrome.scripting.executeScript({
+                        target: { tabId: brightspaceTab.id },
+                        func: () => {
+                            // Multiple Brightspace indicators
+                            return !!document.querySelector('d2l-navigation') || 
+                                !!document.querySelector('d2l-course-tile-grid') ||
+                                document.title.includes('Brightspace') ||
+                                window.location.href.includes('brightspace');
+                        }
+                    }),
+                    chrome.scripting.executeScript({
+                        target: { tabId: brightspaceTab.id },
+                        func: () => {
+                            // Comprehensive login detection
+                            return window.location.href.includes('login') || 
+                                !!document.querySelector('#password') ||
+                                !!document.querySelector('input[type="password"]') ||
+                                !!document.querySelector('[data-testid="login-button"]') ||
+                                window.location.href.includes('login.microsoftonline.com') ||
+                                !!document.querySelector('input[name="passwd"]');
+                        }
+                    })
+                ]);
+
+                if (isLoginPage[0].result) {
+                    console.log('[Tab] Detected login page');
+                    throw new Error('Please log in to Brightspace first');
+                }
+
+                if (isBrightspace[0].result) {
+                    console.log('[Tab] Verified Brightspace page');
+                    return brightspaceTab;
+                }
+
+                console.log(`[Tab] Brightspace not detected, retrying... (${attempts + 1}/5)`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                attempts++;
+            }
+
+            throw new Error('Could not verify Brightspace page after loading');
+        } catch (error) {
+            console.error('Tab error:', error);
+            throw new Error('Could not access Brightspace. Please log in first.');
+        }
+    }
+
+    async waitForPageLoad(tabId, maxWait = 30000) {
+        return new Promise((resolve, reject) => {
+            const startTime = Date.now();
+            
+            const checkLoad = async () => {
+                if (Date.now() - startTime > maxWait) {
+                    reject(new Error('Page load timeout'));
+                    return;
+                }
+
+                try {
+                    // Use the promise-based tabs.get API
+                    const tab = await chrome.tabs.get(tabId);
+                    
+                    if (tab.status === 'complete') {
+                        // Additional check for DOM readiness
+                        const isReady = await chrome.scripting.executeScript({
+                            target: { tabId },
+                            func: () => document.readyState === 'complete'
+                        });
+                        
+                        if (isReady[0].result) {
+                            resolve();
+                        } else {
+                            setTimeout(checkLoad, 500);
+                        }
+                    } else {
+                        setTimeout(checkLoad, 500);
+                    }
+                } catch (error) {
+                    reject(error);
+                }
+            };
+
+            checkLoad();
+        });
+    }
+
+    async saveScrapedData(courses) {
+        try {
+            await chrome.storage.local.set({ scrapedCourses: courses });
+            console.log(`Saved ${courses.length} courses to local storage.`);
+        } catch (error) {
+            console.error('Error saving scraped data:', error);
+        }
+    }
+
+    async handleAlarm(alarm) {
+        if (alarm.name.startsWith('study_reminder_')) {
+            const reminderId = alarm.name.replace('study_reminder_', 'reminder_');
+            const result = await chrome.storage.local.get([reminderId]);
+            const reminderData = result[reminderId];
+
+            if (reminderData) {
+                chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icons/ExtensionLogo.png',
+                    title: 'Study Reminder',
+                    message: reminderData.message || 'Time to study!',
+                    priority: 2
+                });
+                await chrome.storage.local.remove([reminderId]);
+            }
+        }
+    }
+
+    handleInstallation(details) {
+        if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
+            console.log('StudySync Enhanced installed: initial setup');
+        } else if (details.reason === chrome.runtime.OnInstalledReason.UPDATE) {
+            console.log('StudySync Enhanced updated');
+        }
+    }
+
+
+}
+
+// Initialize the background script
+console.log('Initializing StudySync Background...');
 new StudySyncBackground();
 
+chrome.storage.local.get(['scrapedCourses'], (result) => {
+    console.log('Stored courses:', result.scrapedCourses);
+});

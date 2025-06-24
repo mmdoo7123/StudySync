@@ -1,12 +1,16 @@
 {
   "name": "StudySync Ottawa",
-  "version": "1.0",
+  "version": "3.0",
   "manifest_version": 3,
+  "description": "Professional study companion with Brightspace integration, analytics, and productivity tracking",
   "permissions": [
     "identity",
     "storage",
     "scripting",
     "activeTab",
+    "tabs",
+    "cookies",
+    "notifications",
     "alarms"
   ],
   "host_permissions": [
@@ -16,7 +20,10 @@
     "https://identitytoolkit.googleapis.com/*",
     "https://firestore.googleapis.com/*",
     "https://oauth2.googleapis.com/*",
-    "https://uottawa.brightspace.com/"
+    "https://uottawa.brightspace.com/*",
+    "https://brightspace.uottawa.ca/*",
+    "https://login.microsoftonline.com/*",
+    "https://*.d2l.com/*"
   ],
   "optional_host_permissions": [
     "*://*/*"
@@ -30,7 +37,27 @@
   },
   "oauth2": {
     "client_id": "385701813068-h70jb49tbhvcbjusfd652840760clkpg.apps.googleusercontent.com",
-    "scopes": ["https://www.googleapis.com/auth/calendar", "profile", "email"]
+    "scopes": ["https://www.googleapis.com/auth/calendar", "profile", "openid", "email"]
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*", "src/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "start-timer": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S"
+      },
+      "description": "Start/stop study timer"
+    },
+    "sync-brightspace": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+B"
+      },
+      "description": "Sync with Brightspace"
+    }
   }
 }
 
