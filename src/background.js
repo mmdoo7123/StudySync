@@ -240,312 +240,321 @@ class ChangeDetector {
 
 function getbrightspaceScraperFunction() {
     return async function() {
-        function extractCourseInfo(element, index) {
-            // Skip elements that are clearly not courses
-            const text = element.textContent.trim();
-            if (text.match(/CDATA|function|javascript:|loading|copyright|do not remove|bienvenue|welcome|service|support|©|d21|flex|scroll|body|footer|head|html|script/i)) {
-                return null;
-            }
-            
-            // Skip elements with no visible content
-            if (text.length < 10) return null;
-            
-            // Extract course name - multiple fallbacks
-            let courseName = '';
-            const nameSelectors = [
-                'h1', 'h2', 'h3', 'h4', 
-                '.d2l-heading-2', '.d2l-heading-3', 
-                '[data-testid="course-name"]',
-                '.d2l-course-name', '.course-name'
-            ];
-            
-            for (const selector of nameSelectors) {
-                const nameEl = element.querySelector(selector);
-                if (nameEl && nameEl.textContent.trim()) {
-                    courseName = nameEl.textContent.trim();
-                    break;
-                }
-            }
-            
-            if (!courseName) {
-                // Fallback to first meaningful text
-                courseName = text.substring(0, 50).replace(/\s{2,}/g, ' ').trim();
-            }
-            
-            // Skip if name looks like code
-            if (courseName.match(/[{};()=*\/]/)) return null;
-            const nonCoursePhrases = [
-                'anytime',
-                'for assistance',
-                'service desk',
-                'help',
-                'support',
-                'welcome',
-                'bienvenue'
-            ];
-
-            const lowerName = courseName.toLowerCase();
-            for (const phrase of nonCoursePhrases) {
-                if (lowerName.includes(phrase)) {
-                    console.log(`Skipping non-course element: ${courseName}`);
+        function extractCourseInfoFromShadowDOM(element, index) {
+            try {
+                // 1. Access the shadow root of the d2l-enrollment-card
+                const outerShadowRoot = element.shadowRoot;
+                if (!outerShadowRoot) {
+                    console.warn(`Element ${index} has no outer shadow root.`);
                     return null;
                 }
-            }
-            // Extract course URL and ID
-            let courseUrl = '';
-            let courseId = '';
-            const linkEl = element.querySelector('a[href*="/d2l/"]'); // More generic selector
-            
-            if (linkEl && linkEl.href) {
-                courseUrl = linkEl.href;
-                // Try multiple patterns for course ID extraction
-                const idPatterns = [
-                    /\/d2l\/home\/(\d+)/,
-                    /\/d2l\/le\/content\/(\d+)/,
-                    /\/d2l\/lp\/ouHome\/(\d+)/,
-                    /[&?]ou=(\d+)/  // Additional pattern for ID in query params
-                ];
-                
-                for (const pattern of idPatterns) {
-                    const idMatch = courseUrl.match(pattern);
+
+                // 2. Find the d2l-card within the outer shadow root
+                const d2lCard = outerShadowRoot.querySelector('d2l-card');
+                if (!d2lCard) {
+                    console.warn(`Element ${index} has no d2l-card in outer shadow root.`);
+                    return null;
+                }
+
+                // 3. Access the shadow root of the d2l-card
+                const innerShadowRoot = d2lCard.shadowRoot;
+                if (!innerShadowRoot) {
+                    console.warn(`Element ${index} has no inner shadow root for d2l-card.`);
+                    return null;
+                }
+
+                // 4. Extract course name, URL, and ID from the inner shadow root
+                let courseName = '';
+                let courseUrl = '';
+                let courseId = '';
+                let courseCode = '';
+                const deadlines = [];
+
+                // The screenshot shows the course name and link within an <a> tag
+                const linkElement = innerShadowRoot.querySelector('a[href*="/d2l/home/"]');
+                if (linkElement) {
+                    courseName = linkElement.textContent.trim();
+                    courseUrl = linkElement.href;
+
+                    // Extract course ID from URL
+                    const idMatch = courseUrl.match(/\/d2l\/home\/(\d+)/);
                     if (idMatch) {
                         courseId = idMatch[1];
-                        break;
                     }
-                }
-            }
 
-            // Extract course code from name
-            let courseCode = '';
-            
-            // Strategy 1: Extract from data attributes
-            const dataCode = element.getAttribute('data-course-code') || 
-                            element.closest('[data-course-code]')?.getAttribute('data-course-code');
-            if (dataCode) {
-                courseCode = dataCode.trim().toUpperCase();
-            }
-            
-            // Strategy 2: Extract from URL
-            if (!courseCode && linkEl && linkEl.href) {
-                const urlPatterns = [
-                    /\/d2l\/home\/(\d+)_([A-Z]{2,4}\d{3,4}[A-Z]?)/i,
-                    /[&?]code=([A-Z]{2,4}\d{3,4}[A-Z]?)/i,
-                    /[&?]course=([A-Z]{2,4}\d{3,4}[A-Z]?)/i
+                    // Attempt to extract course code from the name (e.g., ADM2320 X00)
+                    const codeMatch = courseName.match(/([A-Z]{2,4}\s?\d{3,4}[A-Z]?)/i);
+                    if (codeMatch) {
+                        courseCode = codeMatch[1].replace(/\s+/, '').toUpperCase();
+                    }
+                } else {
+                    console.warn(`Element ${index}: Could not find course link in inner shadow root.`);
+                    return null;
+                }
+
+                // Extract deadlines (if any are present within the shadow DOM structure)
+                // Based on the screenshot, deadlines might be outside the d2l-card,
+                // or in other specific elements within the outer shadow root.
+                // We'll look for common deadline patterns within the outer shadow root.
+                const deadlineSelectors = [
+                    '.d2l-activity-deadline',
+                    '[data-testid="activity-deadline"]',
+                    '.d2l-date-text',
+                    '.d2l-datetime',
+                    '[class*="d2l-deadline"]',
+                    '[class*="d2l-due-date"]',
+                    '.d2l-list-item-content',
+                    '.d2l-tile-content'
                 ];
-                
-                for (const pattern of urlPatterns) {
-                    const match = linkEl.href.match(pattern);
-                    if (match && match[1]) {
-                        courseCode = match[1].toUpperCase();
-                        break;
-                    }
-                }
-            }
-            
-            // Strategy 3: Extract from element ID/class
-            if (!courseCode) {
-                const idPattern = /([A-Z]{2,4}\d{3,4}[A-Z]?)/i;
-                const idMatch = element.id.match(idPattern) || 
-                                Array.from(element.classList).find(c => c.match(idPattern))?.match(idPattern);
-                if (idMatch) {
-                    courseCode = idMatch[1].toUpperCase();
-                }
-            }
-            
-            // Strategy 4: Extract from text content patterns
-            if (!courseCode) {
-                const textPatterns = [
-                    // Standard pattern: ABC 1234 or ABC1234
-                    /([A-Z]{2,4}\s?\d{3,4}[A-Z]?)/i,
-                        /([A-Z]{2,4}-\d{3,4}[A-Z]?)/i,
-                        /(?:course|code|id)[:\s-]+([A-Z]{2,4}\d{3,4}[A-Z]?)/i
-                    ];
-                
-                for (const pattern of textPatterns) {
-                    const match = text.match(pattern);
-                    if (match && match[1]) {
-                        // Reconstruct code from match groups
-                        courseCode = match.slice(1).join('').toUpperCase();
-                        break;
-                    }
-                }
-            }
-            // After all extraction attempts, add a fallback
-            if (!courseCode && courseName) {
-                // Try to extract from course name
-                const codeMatch = courseName.match(/([A-Z]{2,4}\s?\d{3,4}[A-Z]?)/);
-                if (codeMatch) {
-                    courseCode = codeMatch[1].replace(/\s+/, '').toUpperCase();
-                }
-            }
 
-            // Extract deadlines with more comprehensive selectors
-            const deadlines = [];
-            const deadlineSelectors = [
-                '.d2l-activity-deadline', 
-                '[data-testid="activity-deadline"]',
-                '.d2l-date-text', 
-                '.d2l-datetime'
-            ];
-            
-            deadlineSelectors.forEach(selector => {
-                element.querySelectorAll(selector).forEach(el => {
-                    const text = el.textContent.trim();
-                    if (text) deadlines.push(text);
+                deadlineSelectors.forEach(selector => {
+                    outerShadowRoot.querySelectorAll(selector).forEach(el => {
+                        const text = el.textContent.trim();
+                        if (text) deadlines.push(text);
+                    });
                 });
-            });
 
-            return {
-                name: courseName,
-                code: courseCode,
-                url: courseUrl,
-                deadlines: deadlines,
-                elementIndex: index,
-                courseId: courseId
-            };
+                // Basic validation
+                if (!courseName || courseName.trim().length < 5 || !courseUrl || !courseId) {
+                    console.warn(`Element ${index}: Incomplete course data - Name: ${courseName}, URL: ${courseUrl}, ID: ${courseId}`);
+                    return null;
+                }
+
+                return {
+                    name: courseName,
+                    code: courseCode,
+                    url: courseUrl,
+                    deadlines: deadlines,
+                    elementIndex: index,
+                    courseId: courseId
+                };
+
+            } catch (error) {
+                console.error(`Error in extractCourseInfoFromShadowDOM for element ${index}:`, error);
+                return null;
+            }
         }
         
-        
-         try {
-            console.log('Scraper: Executing focused Brightspace scraper...');
+        // Deadline Processor Class - Inline for service worker compatibility
+        class DeadlineProcessor {
+            constructor() {
+                this.categories = {
+                    assignment: {
+                        keywords: ['assignment', 'hw', 'homework', 'project', 'report', 'essay', 'submission', 'submit', 'lab'],
+                        icon: '📄'
+                    },
+                    quiz: {
+                        keywords: ['quiz', 'test', 'midterm', 'assessment', 'evaluation'],
+                        icon: '🧪'
+                    },
+                    exam: {
+                        keywords: ['exam', 'final', 'examination', 'finals'],
+                        icon: '📅'
+                    }
+                };
+            }
+
+            categorizeDeadline(title, description = '') {
+                const text = (title + ' ' + description).toLowerCase();
+                
+                for (const [categoryName, categoryData] of Object.entries(this.categories)) {
+                    for (const keyword of categoryData.keywords) {
+                        if (text.includes(keyword)) {
+                            return {
+                                type: categoryName,
+                                icon: categoryData.icon,
+                                confidence: this.calculateConfidence(text, keyword)
+                            };
+                        }
+                    }
+                }
+                
+                return {
+                    type: 'assignment',
+                    icon: '📄',
+                    confidence: 0.3
+                };
+            }
+
+            calculateConfidence(text, keyword) {
+                const words = text.split(/\s+/);
+                const keywordIndex = words.findIndex(word => word.includes(keyword));
+                
+                if (keywordIndex === -1) return 0.5;
+                if (keywordIndex < 3) return 0.9;
+                if (keywordIndex < 6) return 0.7;
+                return 0.5;
+            }
+
+            normalizeDeadline(rawText) {
+                const category = this.categorizeDeadline(rawText);
+                const dateMatch = this.extractDate(rawText);
+                const title = this.extractTitle(rawText);
+
+                return {
+                    type: category.type,
+                    title: title,
+                    dueDate: dateMatch ? dateMatch.toISOString().split('T')[0] : null,
+                    rawText: rawText,
+                    icon: category.icon,
+                    confidence: category.confidence,
+                    extractedAt: new Date().toISOString()
+                };
+            }
+
+            extractDate(text) {
+                const datePatterns = [
+                    /(\w+\s+\d{1,2},\s+\d{4})/g,
+                    /(\d{1,2}\/\d{1,2}\/\d{4})/g,
+                    /(\d{4}-\d{2}-\d{2})/g,
+                    /(\w+\s+\d{1,2})/g
+                ];
+
+                for (const pattern of datePatterns) {
+                    const match = text.match(pattern);
+                    if (match) {
+                        const dateStr = match[0];
+                        const parsedDate = new Date(dateStr);
+                        if (!isNaN(parsedDate.getTime())) {
+                            return parsedDate;
+                        }
+                    }
+                }
+                return null;
+            }
+
+            extractTitle(text) {
+                let title = text.replace(/^(due|deadline|assignment|quiz|exam):\s*/i, '');
+                title = title.replace(/\s*(due|deadline)\s*:.*$/i, '');
+                title = title.replace(/\s*-\s*\w+\s+\d{1,2}(,\s+\d{4})?.*$/i, '');
+                title = title.replace(/\s*\d{1,2}\/\d{1,2}\/\d{4}.*$/i, '');
+                return title.trim();
+            }
+
+            processDeadlines(rawDeadlines) {
+                return rawDeadlines
+                    .filter(deadline => deadline && deadline.trim().length > 0)
+                    .map(deadline => this.normalizeDeadline(deadline))
+                    .sort((a, b) => {
+                        if (a.dueDate && b.dueDate) {
+                            return new Date(a.dueDate) - new Date(b.dueDate);
+                        }
+                        if (a.dueDate && !b.dueDate) return -1;
+                        if (!a.dueDate && b.dueDate) return 1;
+                        
+                        const typePriority = { exam: 3, quiz: 2, assignment: 1 };
+                        return (typePriority[b.type] || 0) - (typePriority[a.type] || 0);
+                    });
+            }
+        }
+
+        try {
+            console.log('Scraper: Executing Brightspace scraper with robust nested Shadow DOM support...');
             
-            // Wait for courses to load
+            // Wait for page to be fully loaded and stable
             await new Promise(resolve => {
                 if (document.readyState === 'complete') {
                     resolve();
                 } else {
                     document.addEventListener('DOMContentLoaded', resolve);
-                    setTimeout(resolve, 3000);
+                    // Increased timeout for dynamic content and Shadow DOMs to load
+                    setTimeout(resolve, 5000); 
                 }
             });
-            
-            // Find course containers
-            const commonContainers = [
-                '#d2l_my_courses_widget',
-                '.d2l-my-courses-container',
-                '.d2l-course-widget',
-                '#course-widget',
-                'd2l-my-courses',
-                'd2l-course-tile-grid',
-                '.d2l-course-homepage',
-                '.d2l-course-list' 
-            ];
             
             let courseElements = [];
-            
-            for (const containerSelector of commonContainers) {
-                const container = document.querySelector(containerSelector);
-                if (container) {
-                    console.log(`Found course container: ${containerSelector}`);
-                    courseElements = Array.from(container.querySelectorAll(
-                        '[data-testid="course-tile"], .d2l-course-tile, .d2l-enrollment-card'
-                    ));
-                    break;
-                }
-            }
-            
-            // Search whole document if no container found
-            if (courseElements.length === 0) {
-                console.log('No course container found, searching entire document');
-                const courseSelectors = [
-                    '[data-testid="course-tile"]',
-                    '.d2l-course-tile',
-                    '.d2l-enrollment-card',
-                    '.d2l-course-card',
-                    '.course-tile',
-                    '.d2l-my-courses-course-name',
-                    '.d2l-course-link',
-                    'd2l-enrollment-card', 
-                    'd2l-course-tile' 
-                ];
-                
-                for (const selector of courseSelectors) {
-                    const elements = Array.from(document.querySelectorAll(selector));
-                    courseElements = courseElements.concat(elements);
-                }
-            }
-            
-            console.log(`Found ${courseElements.length} potential course tiles`);
-            
-            // Process all course elements
-            const courses = [];
-            courseElements.forEach((element, index) => {
-                try {
-                    const courseData = extractCourseInfo(element, index);
-                    if (courseData) {
-                        console.log(`Found course: ${courseData.name}`);
-                        courses.push(courseData);
-                    }
-                } catch (error) {
-                    console.warn(`Error processing element ${index}:`, error);
-                }
-            });
-        
-            // Filter out invalid courses
-            const validCourses = courses.filter(course => 
-                course && 
-                course.courseId && 
-                course.courseId.trim() !== '' &&  // Ensure non-empty course ID
-                course.name && 
-                course.name.trim().length > 3 &&
-                !course.name.match(/CDATA|function|javascript:/i)
-            );
-            // detailed logging for validation failures
-            const invalidCourses = courses.filter(course => 
-                !course ||
-                !course.courseId || 
-                course.courseId.trim() === '' || 
-                !course.name || 
-                course.name.trim().length <= 3 ||
-                course.name.match(/CDATA|function|javascript:/i)
-            );
-            console.log(`Found ${invalidCourses.length} invalid courses`);
-            invalidCourses.forEach((course, index) => {
-                console.log(`Invalid course #${index + 1}:`, course);
-                if (!course.courseId || course.courseId.trim() === '') {
-                    console.log('  Reason: Missing course ID');
-                }
-                if (!course.name || course.name.trim().length <= 3) {
-                    console.log('  Reason: Invalid course name');
-                }
-                if (course.name.match(/CDATA|function|javascript:/i)) {
-                    console.log('  Reason: Invalid name pattern');
-                }
-            });
+            let foundContainerRoot = null; // This will hold the ShadowRoot or Element where d2l-enrollment-cards are found
 
-            // Fallback if no courses found
-            if (validCourses.length === 0) {
-                console.log('No courses found with selectors, trying fallback method...');
-                const allElements = document.querySelectorAll('*');
-                const possibleCourses = [];
-                
-                allElements.forEach(el => {
-                    const text = el.textContent.trim();
-                    if (text.length > 20 && text.length < 200 && 
-                        !text.match(/CDATA|function|javascript:|loading|copyright|do not remove|bienvenue|welcome|service|support|©|d21|flex|scroll|body|footer|head|html|script/i) &&
-                        text.match(/(course|class|subject|module)/i)) {
-                        possibleCourses.push(el);
+            // Attempt 1: Find d2l-my-courses-grid directly from the document
+            console.log('Attempt 1: Looking for d2l-my-courses-grid directly...');
+            const directGrid = document.querySelector('d2l-my-courses-grid');
+            if (directGrid) {
+                foundContainerRoot = directGrid.shadowRoot || directGrid;
+                console.log(`Found d2l-my-courses-grid directly. Has shadowRoot: ${!!directGrid.shadowRoot}`);
+            }
+
+            // Attempt 2: Iterate through all d2l-tab-panel elements
+            if (!foundContainerRoot) {
+                console.log('Attempt 2: d2l-my-courses-grid not found directly. Checking d2l-tab-panels...');
+                const tabPanels = document.querySelectorAll('d2l-tab-panel');
+                for (const panel of tabPanels) {
+                    let currentSearchRoot = panel.shadowRoot || panel;
+                    
+                    const gridInPanel = currentSearchRoot.querySelector('d2l-my-courses-grid');
+                    if (gridInPanel) {
+                        foundContainerRoot = gridInPanel.shadowRoot || gridInPanel;
+                        console.log(`Found d2l-my-courses-grid within d2l-tab-panel (id: ${panel.id || 'N/A'}). Has shadowRoot: ${!!gridInPanel.shadowRoot}`);
+                        break;
                     }
-                });
-                
-                console.log(`Found ${possibleCourses.length} possible course elements`);
-                
-                possibleCourses.forEach((element, index) => {
-                    try {
-                        const courseData = extractCourseInfo(element, index);
-                        if (courseData) {
-                            console.log(`Found course via fallback: ${courseData.name}`);
-                            validCourses.push(courseData);
+                }
+            }
+
+            // Attempt 3: Look for d2l-my-courses-content (parent of grid)
+            if (!foundContainerRoot) {
+                console.log('Attempt 3: Still no container. Looking for d2l-my-courses-content...');
+                const directContent = document.querySelector('d2l-my-courses-content');
+                if (directContent) {
+                    foundContainerRoot = directContent.shadowRoot || directContent;
+                    console.log(`Found d2l-my-courses-content directly. Has shadowRoot: ${!!directContent.shadowRoot}`);
+                }
+            }
+
+            // Attempt 4: Look for d2l-my-courses (a common top-level component)
+            if (!foundContainerRoot) {
+                console.log('Attempt 4: Still no container. Looking for d2l-my-courses...');
+                const myCoursesComponent = document.querySelector('d2l-my-courses');
+                if (myCoursesComponent) {
+                    foundContainerRoot = myCoursesComponent.shadowRoot || myCoursesComponent;
+                    console.log(`Found d2l-my-courses directly. Has shadowRoot: ${!!myCoursesComponent.shadowRoot}`);
+                    // If d2l-my-courses has a shadow root, it might contain the grid or content directly
+                    if (myCoursesComponent.shadowRoot) {
+                        const gridInsideMyCourses = myCoursesComponent.shadowRoot.querySelector('d2l-my-courses-grid');
+                        if (gridInsideMyCourses) {
+                            foundContainerRoot = gridInsideMyCourses.shadowRoot || gridInsideMyCourses;
+                            console.log(`Found d2l-my-courses-grid inside d2l-my-courses shadowRoot. Has shadowRoot: ${!!gridInsideMyCourses.shadowRoot}`);
+                        } else {
+                            const contentInsideMyCourses = myCoursesComponent.shadowRoot.querySelector('d2l-my-courses-content');
+                            if (contentInsideMyCourses) {
+                                foundContainerRoot = contentInsideMyCourses.shadowRoot || contentInsideMyCourses;
+                                console.log(`Found d2l-my-courses-content inside d2l-my-courses shadowRoot. Has shadowRoot: ${!!contentInsideMyCourses.shadowRoot}`);
+                            }
                         }
-                    } catch (error) {
-                        console.warn(`Error processing fallback element ${index}:`, error);
                     }
-                });
+                }
+            }
+
+
+            // Final step: Query for d2l-enrollment-card within the found container root
+            if (foundContainerRoot) {
+                courseElements = Array.from(foundContainerRoot.querySelectorAll('d2l-enrollment-card'));
+                console.log(`Found ${courseElements.length} d2l-enrollment-card elements within the identified container root.`);
+            } else {
+                console.warn('No suitable container element or shadow root found after all attempts. Falling back to direct document query for d2l-enrollment-card (unlikely to work).');
+                courseElements = Array.from(document.querySelectorAll('d2l-enrollment-card'));
             }
             
+            const courses = [];
+            for (let i = 0; i < courseElements.length; i++) {
+                const element = courseElements[i];
+                // This function already handles the nested shadow roots of d2l-enrollment-card and d2l-card
+                const courseData = extractCourseInfoFromShadowDOM(element, i); 
+                if (courseData) {
+                    console.log(`Extracted course: ${courseData.name} (ID: ${courseData.courseId})`);
+                    courses.push(courseData);
+                }
+            }
+        
+            // Process deadlines for each course
+            const deadlineProcessor = new DeadlineProcessor();
+            for (const course of courses) {
+                if (course.deadlines && course.deadlines.length > 0) {
+                    course.deadlines = deadlineProcessor.processDeadlines(course.deadlines);
+                }
+            }
+
             return { 
                 success: true, 
-                courses: validCourses,
+                courses: courses,
                 timestamp: Date.now(),
                 url: window.location.href
             };
@@ -554,9 +563,11 @@ function getbrightspaceScraperFunction() {
             console.error('Scraper error:', error);
             return { success: false, error: error.message };
         }
-        
     };
 }
+
+
+
 // Main Background Script Class
 class StudySyncBackground {
     constructor() {
@@ -589,14 +600,28 @@ class StudySyncBackground {
 
         // Load session data on startup
         this.loadSessionData();
-
+        setInterval(() => this.checkSession(), 60 * 1000);
         console.log('StudySync Enhanced Background - Ready!');
     }
+    async checkSession() {
+        const result = await chrome.storage.local.get(['brightspaceSession']);
+        if (result.brightspaceSession && Date.now() > result.brightspaceSession.expiresAt) {
+            await this.handleLogout();
+            this.showToast('Session expired. Please log in again.', 'warning');
+        }
+    } 
 
     async loadSessionData() {
         try {
             const result = await chrome.storage.local.get(['brightspaceSession']);
             if (result.brightspaceSession) {
+                // Check expiration
+                if (Date.now() > result.brightspaceSession.expiresAt) {
+                    console.log('Session expired, clearing data');
+                    await this.clearSessionData();
+                    return;
+                }
+                
                 this.sessionData = result.brightspaceSession;
                 console.log('Loaded existing Brightspace session data');
             }
@@ -605,7 +630,7 @@ class StudySyncBackground {
         }
     }
 
-    async saveSessionData(sessionData) {
+     async saveSessionData(sessionData) {
         try {
             this.sessionData = {
                 ...sessionData,
@@ -616,8 +641,6 @@ class StudySyncBackground {
             await chrome.storage.local.set({ 
                 brightspaceSession: this.sessionData 
             });
-            
-            console.log('Saved Brightspace session data securely');
         } catch (error) {
             console.error('Error saving session data:', error);
         }
@@ -649,17 +672,25 @@ class StudySyncBackground {
             
             switch (request.action) {
                 case 'authenticate':
-                    await this.handleAuthentication(sendResponse);
+                    handleAuthentication().then(sendResponse).catch(error => {
+                        console.error('Auth error:', error);
+                        sendResponse({ success: false, error: error.message });
+                    });
                     break;
-                
+                case 'saveSession':
+                    await this.saveSessionData(request.sessionData);
+                    sendResponse({ success: true });
+                    break;
+                    
                 case 'scrapeBrightspace':
                     await this.handleBrightspaceScraping(sendResponse);
                     break;
                 
                 case 'validateSession':
-                    sendResponse({ success: true, valid: this.isSessionValid() });
+                    const isValid = await validateSession();
+                    sendResponse({ valid: isValid });
                     break;
-                
+
                 case 'clearSession':
                     await this.clearSessionData();
                     sendResponse({ success: true });
@@ -671,55 +702,6 @@ class StudySyncBackground {
             }
         } catch (error) {
             console.error('Background message error:', error);
-            sendResponse({ success: false, error: error.message });
-        }
-    }
-
-    async handleAuthentication(sendResponse) {
-        try {
-            console.log('Starting Google OAuth authentication...');
-            
-            // Get OAuth token using Chrome Identity API
-            const token = await new Promise((resolve, reject) => {
-                chrome.identity.getAuthToken({ interactive: true }, (token) => {
-                    if (chrome.runtime.lastError) {
-                        console.error('Auth error:', chrome.runtime.lastError);
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else {
-                        resolve(token);
-                    }
-                });
-            });
-
-            if (!token) {
-                throw new Error('Failed to get authentication token');
-            }
-
-            console.log('Got auth token, fetching user info...');
-
-            // Get user info from Google API
-            const userResponse = await fetch(`https://www.googleapis.com/oauth2/v2/userinfo?access_token=${token}`);
-            
-            if (!userResponse.ok) {
-                throw new Error('Failed to fetch user information');
-            }
-
-            const userData = await userResponse.json();
-            
-            const user = {
-                id: userData.id,
-                email: userData.email,
-                name: userData.name,
-                picture: userData.picture,
-                token: token,
-                authenticatedAt: Date.now()
-            };
-
-            console.log('Authentication successful:', user.email);
-            sendResponse({ success: true, user });
-
-        } catch (error) {
-            console.error('Authentication error:', error);
             sendResponse({ success: false, error: error.message });
         }
     }
@@ -981,6 +963,56 @@ class StudySyncBackground {
 
 }
 
+async function handleAuthentication() {
+    const clientId = '385701813068-h70jb49tbhvcbjusfd652840760clkpg.apps.googleusercontent.com';
+    const scopes = ['https://www.googleapis.com/auth/calendar.events', 'profile', 'email'];
+
+    return new Promise((resolve, reject) => {
+        chrome.identity.getAuthToken({ interactive: true }, async (token) => {
+            if (chrome.runtime.lastError || !token) {
+                return reject(new Error(chrome.runtime.lastError?.message || 'Token fetch failed'));
+            }
+
+            try {
+                const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: {
+                        Authorization: `Bearer ${token}`
+                    }
+                });
+
+                if (!userInfoRes.ok) 
+                    {
+                         const userInfo = await userInfoRes.json();
+        
+                        return resolve({
+                            success: true,
+                            token: token,
+                            user: {
+                                name: userInfo.name,
+                                email: userInfo.email,
+                                picture: userInfo.picture,
+                                id: userInfo.sub
+                            }
+                        });
+                    }
+                    const errorText = await userInfoRes.text();
+                
+            } catch (error) {
+                reject(error);
+                throw new Error('Failed to fetch user profile: ' + errorText);
+
+            }
+        });
+    });
+}
+async function validateSession() {
+    const result = await chrome.storage.local.get(['lastLogin']);
+    if (!result.lastLogin) return false;
+    
+    const twentyFourHours = 24 * 60 * 60 * 1000;
+    return (Date.now() - result.lastLogin) < twentyFourHours;
+}
+
 // Initialize the background script
 console.log('Initializing StudySync Background...');
 new StudySyncBackground();
@@ -988,3 +1020,4 @@ new StudySyncBackground();
 chrome.storage.local.get(['scrapedCourses'], (result) => {
     console.log('Stored courses:', result.scrapedCourses);
 });
+

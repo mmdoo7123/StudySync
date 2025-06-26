@@ -22,7 +22,9 @@ class StudySyncApp {
             analytics: {}
         };
         this.theme = 'light';
+        this.sessionDuration = 24 * 60 * 60 * 1000; // Default session duration in seconds
         this.init();
+
     }
 
     async init() {
@@ -40,10 +42,21 @@ class StudySyncApp {
         
         // Check authentication
         await this.checkAuthStatus();
-        
-        console.log('StudySync Enhanced - Ready!');
-    }
+        await this.checkSession();
 
+        console.log('StudySync Enhanced - Ready!');
+        // Start session check interval
+        this.sessionCheck = setInterval(() => this.checkSession(), 60000); // Check every minute
+
+    }
+    
+    async checkSession() {
+        const result = await chrome.storage.local.get(['lastLogin']);
+        if (result.lastLogin && Date.now() - result.lastLogin > this.sessionDuration) {
+            await this.handleLogout();
+            this.showToast('Session expired. Please log in again.', 'warning');
+        }
+    }
     async loadUserData() {
         try {
             const result = await chrome.storage.local.get(['user', 'theme', 'termsAccepted']);
@@ -159,18 +172,25 @@ class StudySyncApp {
 
     async checkAuthStatus() {
         try {
-            const result = await chrome.storage.local.get(['user']);
-            if (result.user) {
+            const result = await chrome.storage.local.get(['user', 'brightspaceSession']);
+            
+            // Check if session exists and is valid
+            if (result.brightspaceSession && Date.now() < result.brightspaceSession.expiresAt) {
                 this.user = result.user;
                 this.showMainContent();
                 
-                // Check if terms need to be shown
                 if (!this.termsAccepted) {
                     this.showTermsModal();
                 }
-            } else {
-                this.showLoginSection();
+                return;
             }
+            
+            // Clear expired session
+            if (result.brightspaceSession) {
+                await chrome.storage.local.remove(['user', 'brightspaceSession']);
+            }
+            
+            this.showLoginSection();
         } catch (error) {
             console.error('Error checking auth status:', error);
             this.showLoginSection();
@@ -188,9 +208,6 @@ class StudySyncApp {
             if (response.success) {
                 this.user = response.user;
                 await chrome.storage.local.set({ user: this.user });
-                
-                this.hideLoading();
-                this.showMainContent();
                 
                 // Show terms if not accepted
                 if (!this.termsAccepted) {
@@ -210,7 +227,8 @@ class StudySyncApp {
 
     async handleLogout() {
         try {
-            await chrome.storage.local.remove(['user']);
+            // Clear session data
+            await chrome.storage.local.remove(['user', 'lastLogin']);
             this.user = null;
             this.showLoginSection();
             this.showToast('Signed out successfully', 'success');
