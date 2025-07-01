@@ -207,7 +207,14 @@ class StudySyncApp {
 
             if (response.success) {
                 this.user = response.user;
-                await chrome.storage.local.set({ user: this.user });
+                await chrome.storage.local.set({ 
+                    user: this.user,
+                    lastLogin: Date.now() // Add last login timestamp
+                });
+                
+                // Show main content immediately after successful login
+                this.showMainContent();
+                this.hideLoading();
                 
                 // Show terms if not accepted
                 if (!this.termsAccepted) {
@@ -222,6 +229,7 @@ class StudySyncApp {
             console.error('Login error:', error);
             this.hideLoading();
             this.showToast('Login failed. Please try again.', 'error');
+            this.showLoginSection();
         }
     }
 
@@ -245,8 +253,11 @@ class StudySyncApp {
     }
 
     showMainContent() {
-        document.getElementById('login-section')?.classList.add('hidden');
-        document.getElementById('main-content')?.classList.remove('hidden');
+        const loginSection = document.getElementById('login-section');
+        const mainContent = document.getElementById('main-content');
+        
+        if (loginSection) loginSection.classList.add('hidden');
+        if (mainContent) mainContent.classList.remove('hidden');
         
         // Update user info
         if (this.user) {
@@ -573,53 +584,47 @@ class StudySyncApp {
 
         this.showLoading('Syncing courses from Brightspace...');
 
-        try {
-            const response = await chrome.runtime.sendMessage({
-                action: 'scrapeBrightspace'
-            });
+        let retries = 0;
+        const maxRetries = 2;
 
-            if (response.success) {
-                this.studyData.courses = response.courses || [];
-                await this.saveStudyData();
-                this.loadCourses();
-                this.updateDashboardStats();
-                
-                this.showToast(`Synced ${this.studyData.courses.length} courses!`, 'success');
-                
-                // Update sync status
-                const syncStatus = document.getElementById('sync-status');
-                if (syncStatus) {
-                    syncStatus.innerHTML = `
-                        <span class="status-icon">✅</span>
-                        <span>Last sync: Just now</span>
-                    `;
+        while (retries < maxRetries) {
+            try {
+                this.showLoading('Syncing courses...');
+                const response = await chrome.runtime.sendMessage({ action: 'scrapeBrightspace' });
+
+                if (response.success) {
+                    // success path
+                    return;
                 }
-            } else {
-                throw new Error(response.error || 'Sync failed');
+            } catch (error) {
+                retries++;
+                if (retries >= maxRetries) {
+                    let errorMessage = 'Sync failed';
+                    if (error.message.includes('Wrong Brightspace view')) {
+                        errorMessage = 'Please open the Brightspace student dashboard first';
+                    } else if (error.message.includes('Login required')) {
+                        errorMessage = 'Session expired - please log in again';
+                    }
+                    
+                    this.showToast(errorMessage, 'error', 5000);
+                    throw error;
+                }
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
-        } catch (error) {
-            console.error('Brightspace sync error:', error);
-            this.showToast('Sync failed. Make sure you\'re logged into Brightspace.', 'error');
-        } finally {
-            this.hideLoading();
         }
     }
 
     loadCourses() {
-        const coursesEl = document.getElementById('courses-list');
+       const coursesEl = document.getElementById('courses-list');
+        const termHeader = document.getElementById('term-header');
+        
         if (!coursesEl) return;
-
-        if (this.studyData.courses.length === 0) {
-            coursesEl.innerHTML = `
-                <div class="course-card placeholder">
-                    <div class="course-icon">📚</div>
-                    <div class="course-info">
-                        <h3>No courses yet</h3>
-                        <p>Sync your Brightspace courses to get started</p>
-                    </div>
-                </div>
-            `;
-            return;
+        
+        // Update term header
+        if (termHeader) {
+            termHeader.innerHTML = this.studyData.currentTerm 
+                ? `<h2>My Courses - ${this.studyData.currentTerm}</h2>`
+                : '<h2>My Courses</h2>';
         }
 
         const coursesHTML = this.studyData.courses.map(course => `
