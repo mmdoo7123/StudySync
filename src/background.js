@@ -227,10 +227,6 @@ class ChangeDetector {
     }
 }
 
-
-
-
-
 // Main Background Script Class
 class StudySyncBackground {
     constructor() {
@@ -526,12 +522,19 @@ class StudySyncBackground {
             for (const course of scrapedData.courses) {
                 const processedDeadlines = this.deadlineProcessor.processDeadlines(course.deadlines);
                 course.deadlines = processedDeadlines;
-                
+                 
+                // Extract course code
+                course.code = extractCourseCode(course.name);
+                console.log(course.code);
                 const changes = await this.changeDetector.detectChanges(
                     course.courseId, 
                     processedDeadlines
                 );
                 console.log(`Processed course: ${course.name}`);
+                
+                // Store the course data
+                await this.storeCourseData(course);
+
             }
             
             // Save and respond ONCE
@@ -551,6 +554,7 @@ class StudySyncBackground {
                 error: error.message 
             });
         }
+        
     }
     
     async findOrCreateBrightspaceTab() {
@@ -719,6 +723,49 @@ class StudySyncBackground {
                 });
                 await chrome.storage.local.remove([reminderId]);
             }
+        }
+    }
+    async storeCourseData(course) {
+        try {
+            // Get existing courses
+            const result = await chrome.storage.local.get(['courses']);
+            const courses = result.courses || {};
+            
+            // Update or add the course
+            courses[course.courseId] = {
+                name: course.name,
+                code: course.code,
+                url: course.url,
+                term: course.term,
+                lastUpdated: Date.now()
+            };
+            
+            // Save back to storage
+            await chrome.storage.local.set({ courses });
+            
+            console.log(`Stored course: ${course.code} (${course.courseId})`);
+        } catch (error) {
+            console.error('Error storing course data:', error);
+        }
+    }
+
+    async getCourseData(courseId) {
+        try {
+            const result = await chrome.storage.local.get(['courses']);
+            return result.courses?.[courseId] || null;
+        } catch (error) {
+            console.error('Error retrieving course data:', error);
+            return null;
+        }
+    }
+
+    async getAllCourses() {
+        try {
+            const result = await chrome.storage.local.get(['courses']);
+            return result.courses || {};
+        } catch (error) {
+            console.error('Error retrieving all courses:', error);
+            return {};
         }
     }
 
@@ -1182,6 +1229,25 @@ async function validateSession() {
     
     const twentyFourHours = 24 * 60 * 60 * 1000;
     return (Date.now() - result.lastLogin) < twentyFourHours;
+}
+
+function extractCourseCode(courseName) {
+     if (!courseName) return null;
+    
+    // Pattern matches: ADM2320, CS 3001, MATH1001X, etc.
+    const codePattern = /([A-Z]{2,4})\s?(\d{3,4}[A-Z]?)(?=\s|$|,|\[)/;
+    const match = courseName.match(codePattern);
+    
+    if (match) {
+        // Combine department and number (remove any space)
+        return match[1] + match[2];
+    }
+    
+    // Alternative pattern for codes at end of string
+    const altPattern = /([A-Z]{2,4}\d{3,4}[A-Z]?)(?=$|,)/;
+    const altMatch = courseName.match(altPattern);
+    
+    return altMatch ? altMatch[1] : null;
 }
 
 // Initialize the background script

@@ -526,9 +526,17 @@ class StudySyncApp {
         const goalsEl = document.getElementById('goals-completed');
         if (goalsEl) goalsEl.textContent = `${this.studyData.goals.completed}/${this.studyData.goals.total}`;
 
-        // Courses
+        // Courses - show active courses count
         const coursesEl = document.getElementById('active-courses');
-        if (coursesEl) coursesEl.textContent = this.studyData.courses.length.toString();
+        if (coursesEl) {
+            const activeCourses = this.studyData.courses?.length || 0;
+            coursesEl.textContent = activeCourses.toString();
+            
+            // Add click handler to switch to courses tab
+            coursesEl.closest('.stat-card')?.addEventListener('click', () => {
+                this.switchTab('courses');
+            });
+        }
     }
 
     loadRecentActivity() {
@@ -574,7 +582,37 @@ class StudySyncApp {
         if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
         return 'Just now';
     }
+    getCourseIcon(course) {
+        if (!course.deadlines || course.deadlines.length === 0) {
+            return '📚'; // Default book icon
+        }
 
+        // Get the most common deadline type
+        const typeCounts = {};
+        course.deadlines.forEach(d => {
+            typeCounts[d.type] = (typeCounts[d.type] || 0) + 1;
+        });
+
+        const mostCommonType = Object.keys(typeCounts).reduce((a, b) => 
+            typeCounts[a] > typeCounts[b] ? a : b
+        );
+
+        const icons = {
+            'assignment': '📝',
+            'quiz': '🧪', 
+            'exam': '📅',
+            'project': '📂',
+            'default': '📚'
+        };
+
+        return icons[mostCommonType] || icons.default;
+    }
+
+// Then update the loadCourses method to use it:
+// Change this line:
+// <div class="course-icon">${course.icon || '📚'}</div>
+// To:
+// <div class="course-icon">${this.getCourseIcon(course)}</div>
     // Brightspace Integration
     async syncBrightspace() {
         if (!this.termsAccepted) {
@@ -593,7 +631,16 @@ class StudySyncApp {
                 const response = await chrome.runtime.sendMessage({ action: 'scrapeBrightspace' });
 
                 if (response.success) {
-                    // success path
+                     // Store the courses data
+                    this.studyData.courses = response.courses;
+                    this.studyData.currentTerm = response.currentTerm;
+                    await this.saveStudyData();
+                    
+                    // Update the UI
+                    this.loadCourses();
+                    this.updateDashboardStats();
+                    this.hideLoading();
+                    this.showToast('Courses synced successfully!', 'success');
                     return;
                 }
             } catch (error) {
@@ -615,7 +662,7 @@ class StudySyncApp {
     }
 
     loadCourses() {
-       const coursesEl = document.getElementById('courses-list');
+        const coursesEl = document.getElementById('courses-list');
         const termHeader = document.getElementById('term-header');
         
         if (!coursesEl) return;
@@ -627,12 +674,32 @@ class StudySyncApp {
                 : '<h2>My Courses</h2>';
         }
 
+        // Show placeholder if no courses
+        if (!this.studyData.courses || this.studyData.courses.length === 0) {
+            coursesEl.innerHTML = `
+                <div class="course-card placeholder">
+                    <div class="course-icon">📚</div>
+                    <div class="course-info">
+                        <h3>No courses yet</h3>
+                        <p>Sync your Brightspace courses to get started</p>
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        // Create course cards
         const coursesHTML = this.studyData.courses.map(course => `
-            <div class="course-card" data-course-id="${course.id}">
-                <div class="course-icon">📚</div>
+            <div class="course-card" data-course-id="${course.courseId}">
+                <div class="course-icon">${course.icon || '📚'}</div>
                 <div class="course-info">
-                    <h3>${course.name}</h3>
-                    <p>${course.code || 'Course'}</p>
+                    <h3>${course.code || 'Course'}</h3>
+                    <p>${this.truncateCourseName(course.name)}</p>
+                    <div class="course-meta">
+                        <span class="deadline-count">
+                            ${course.deadlines?.length || 0} upcoming deadlines
+                        </span>
+                    </div>
                 </div>
             </div>
         `).join('');
@@ -643,12 +710,17 @@ class StudySyncApp {
         coursesEl.querySelectorAll('.course-card').forEach(card => {
             card.addEventListener('click', () => {
                 const courseId = card.dataset.courseId;
-                const course = this.studyData.courses.find(c => c.id === courseId);
+                const course = this.studyData.courses.find(c => c.courseId === courseId);
                 if (course && course.url) {
                     chrome.tabs.create({ url: course.url });
                 }
             });
         });
+    }
+
+    truncateCourseName(name, maxLength = 30) {
+        if (!name) return '';
+        return name.length > maxLength ? `${name.substring(0, maxLength)}...` : name;
     }
 
     updateAnalytics(period) {
