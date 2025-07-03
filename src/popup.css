@@ -1367,3 +1367,66 @@ select:focus-visible {
   transition: var(--gh-duration) ease;
   background-position: 100% 100%, 0 0;
 }
+/* Enhanced Course Card Styles */
+.course-card {
+  position: relative;
+}
+
+.course-actions {
+  position: absolute;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.course-card:hover .course-actions {
+  opacity: 1;
+}
+
+.course-action-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--text-secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.course-action-btn:hover {
+  background: var(--primary-color);
+  color: var(--text-inverse);
+  transform: scale(1.1);
+}
+
+.course-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  margin-top: var(--spacing-sm);
+}
+
+.deadline-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.instructor {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Course card improvements */
+.course-card .course-info {
+  flex: 1;
+  padding-right: var(--spacing-xl);
+}
+

@@ -80,8 +80,13 @@ class StudySyncApp {
             const result = await chrome.storage.local.get(['studyData']);
             if (result.studyData) {
                 this.studyData = { ...this.studyData, ...result.studyData };
+
+                if(this.currentTab =='courses'){
+                    this.loadCourses();
+                }
             }
             this.updateDashboardStats();
+            this.updateStudySubjectDropdown(); // Populate dropdown with stored courses
         } catch (error) {
             console.error('Error loading study data:', error);
         }
@@ -639,6 +644,7 @@ class StudySyncApp {
                     // Update the UI
                     this.loadCourses();
                     this.updateDashboardStats();
+                    this.updateStudySubjectDropdown(); // Update dropdown with synced courses
                     this.hideLoading();
                     this.showToast('Courses synced successfully!', 'success');
                     return;
@@ -664,14 +670,21 @@ class StudySyncApp {
     loadCourses() {
         const coursesEl = document.getElementById('courses-list');
         const termHeader = document.getElementById('term-header');
+        const subjectSelect = document.getElementById('study-subject');
         
         if (!coursesEl) return;
         
-        // Update term header
+        // Update term header with current term if available
         if (termHeader) {
             termHeader.innerHTML = this.studyData.currentTerm 
                 ? `<h2>My Courses - ${this.studyData.currentTerm}</h2>`
                 : '<h2>My Courses</h2>';
+        }
+
+         // Clear and rebuild subject dropdown
+        if (subjectSelect) {
+            // Keep the first "Select Subject" option
+            subjectSelect.innerHTML = '<option value="">Select Subject</option>';
         }
 
         // Show placeholder if no courses
@@ -688,25 +701,41 @@ class StudySyncApp {
             return;
         }
 
-        // Create course cards
-        const coursesHTML = this.studyData.courses.map(course => `
-            <div class="course-card" data-course-id="${course.courseId}">
-                <div class="course-icon">${course.icon || '📚'}</div>
-                <div class="course-info">
-                    <h3>${course.code || 'Course'}</h3>
-                    <p>${this.truncateCourseName(course.name)}</p>
-                    <div class="course-meta">
-                        <span class="deadline-count">
-                            ${course.deadlines?.length || 0} upcoming deadlines
-                        </span>
+        // Create course cards and populate subject dropdown
+        const coursesHTML = this.studyData.courses.map(course => {
+            // Add course to subject dropdown
+            if (subjectSelect) {
+                const option = document.createElement('option');
+                option.value = course.code || course.name;
+                option.textContent = `${course.code} - ${course.name}`;
+                subjectSelect.appendChild(option);
+            }
+
+            return `
+                <div class="course-card" data-course-id="${course.courseId}">
+                    <div class="course-icon">${this.getCourseIcon(course)}</div>
+                    <div class="course-info">
+                        <h3>${course.code || 'Course'}</h3>
+                        <p>${this.truncateCourseName(course.name)}</p>
+                        <div class="course-meta">
+                            <span class="deadline-count">
+                                ${course.deadlines?.length || 0} upcoming deadlines
+                            </span>
+                            ${course.instructor ? `<span class="instructor">Instructor: ${course.instructor}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="course-actions">
+                        <button class="course-action-btn" title="Open in Brightspace">
+                            <span class="icon">🔗</span>
+                        </button>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
         coursesEl.innerHTML = coursesHTML;
 
-        // Add click handlers
+        // Add click handlers for course cards
         coursesEl.querySelectorAll('.course-card').forEach(card => {
             card.addEventListener('click', () => {
                 const courseId = card.dataset.courseId;
@@ -716,6 +745,9 @@ class StudySyncApp {
                 }
             });
         });
+        
+        // Update the study subject dropdown with loaded courses
+        this.updateStudySubjectDropdown();
     }
 
     truncateCourseName(name, maxLength = 30) {
@@ -749,6 +781,42 @@ class StudySyncApp {
         }
     }
 
+    updateStudySubjectDropdown() {
+        const subjectSelect = document.getElementById('study-subject');
+        if (!subjectSelect || !this.studyData.courses) return;
+
+        // Keep the default "Select Subject" option
+        subjectSelect.innerHTML = '<option value="">Select Subject</option>';
+
+        // Add courses to dropdown
+        this.studyData.courses.forEach(course => {
+            const option = document.createElement('option');
+            option.value = course.code || course.name;
+            option.textContent = this.getCourseDisplayName(course);
+            subjectSelect.appendChild(option);
+        });
+
+        // Restore last selected subject if available
+        if (this.lastSelectedSubject) {
+            subjectSelect.value = this.lastSelectedSubject;
+        }
+    }
+    
+    getCourseDisplayName(course) {
+    if (!course.code && !course.name) return 'Unknown Course';
+    
+    // If we have both code and name: "ADM2320 - Marketing"
+    if (course.code && course.name) {
+        return `${course.code} - ${this.truncateCourseName(course.name, 30)}`;
+    }
+    
+    // If we only have code
+    if (course.code) return course.code;
+    
+    // If we only have name
+    return this.truncateCourseName(course.name, 40);
+    }
+    
     generateInsights() {
         const insights = [];
         
