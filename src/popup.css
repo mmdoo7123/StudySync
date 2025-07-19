@@ -1430,3 +1430,184 @@ select:focus-visible {
   padding-right: var(--spacing-xl);
 }
 
+
+/* Course Options Modal */
+.course-options-modal .modal-content {
+  max-width: 400px;
+}
+
+.course-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.option-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.option-btn:hover {
+  border-color: var(--primary-color);
+  background: var(--bg-secondary);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.option-btn .icon {
+  font-size: 24px;
+  width: 40px;
+  height: 40px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.option-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.option-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.option-desc {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Syllabus Modal */
+.syllabus-modal .modal-content {
+  max-width: 800px;
+  max-height: 90vh;
+  width: 90vw;
+}
+
+.syllabus-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.syllabus-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-lg) 0;
+  border-top: 1px solid var(--border-light);
+  border-bottom: 1px solid var(--border-light);
+  margin: var(--spacing-lg) 0;
+}
+
+.syllabus-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-lg);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.syllabus-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.syllabus-date {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.syllabus-text {
+  line-height: 1.6;
+  color: var(--text-primary);
+}
+
+.syllabus-text p {
+  margin-bottom: var(--spacing-md);
+}
+
+.syllabus-text p:last-child {
+  margin-bottom: 0;
+}
+
+.modal-actions {
+  display: flex;
+  gap: var(--spacing-md);
+  justify-content: flex-end;
+  margin-top: var(--spacing-lg);
+}
+
+.modal-close-btn {
+  position: absolute;
+  top: var(--spacing-lg);
+  right: var(--spacing-lg);
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: var(--bg-secondary);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 18px;
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.modal-close-btn:hover {
+  background: var(--danger-color);
+  color: var(--text-inverse);
+}
+
+/* Enhanced modal animations */
+.course-options-modal,
+.syllabus-modal {
+  animation: modalFadeIn var(--transition-normal);
+}
+
+.course-options-modal .modal-content,
+.syllabus-modal .modal-content {
+  animation: modalSlideIn var(--transition-normal);
+}
+
+/* Responsive design for modals */
+@media (max-width: 600px) {
+  .syllabus-modal .modal-content {
+    width: 95vw;
+    max-height: 95vh;
+    margin: 2.5vh auto;
+  }
+  
+  .course-options-modal .modal-content {
+    width: 90vw;
+    max-width: none;
+  }
+  
+  .modal-actions {
+    flex-direction: column;
+  }
+  
+  .syllabus-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--spacing-sm);
+  }
+}
+

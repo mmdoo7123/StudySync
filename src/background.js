@@ -347,6 +347,10 @@ class StudySyncBackground {
                     await this.handleBrightspaceScraping(sendResponse);
                     break;
                 
+                case 'scrapeSyllabus':
+                    await this.handleSyllabusScraping(request.courseUrl, request.courseId, sendResponse);
+                    break;
+                
                 case 'validateSession':
                     const isValid = await validateSession();
                     sendResponse({ valid: isValid });
@@ -555,6 +559,123 @@ class StudySyncBackground {
             });
         }
         
+    }
+
+    async handleSyllabusScraping(courseUrl, courseId, sendResponse) {
+        try {
+            // Construct CORRECT syllabus URL
+            const syllabusUrl = `${this.brightspaceBaseUrl}/d2l/le/content/${courseId}/Home?itemIdentifier=Syllabus`;
+            console.log(`Starting syllabus scraping for course ${courseId} at ${syllabusUrl}`);
+            
+            if (!this.isSessionValid()) {
+                sendResponse({ 
+                    success: false, 
+                    error: "Session expired - reauthenticate first"
+                });
+                return;
+            }
+
+            // Find or create tab with CORRECT syllabus URL
+            const tab = await this.findOrCreateCourseTab(syllabusUrl);
+            // Wait for the course page to load
+            await this.waitForPageLoad(tab.id, 30000);
+            
+            // Additional wait for Brightspace components to initialize
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // Execute syllabus scraping
+            const results = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: getSyllabusScraperFunction()
+            });
+
+            if (results[0]?.result?.success) {
+                const scraperResult  = results[0].result;
+                const syllabusData = scraperResult.syllabus; 
+        
+                // Store the syllabus data
+                await this.storeSyllabusData(courseId, syllabusData);
+                
+                console.log(`Successfully scraped syllabus for course ${courseId}`);
+                sendResponse({ 
+                    success: true, 
+                    syllabus: syllabusData,
+                    courseId: courseId
+                });
+                console.log('Syllabus data:', {
+                    title: syllabusData.title,
+                    contentLength: syllabusData.content?.length || 0, // Safe access
+                    url: syllabusData.url
+                });
+            } else {
+                throw new Error('Failed to extract syllabus content');
+            }
+
+        } catch (error) {
+            console.error('Syllabus scraping failed:', error);
+            sendResponse({ 
+                success: false, 
+                error: error.message 
+            });
+        }
+    }
+
+    async findOrCreateCourseTab(courseUrl) {
+        try {
+            console.log(`Finding or creating tab for course: ${courseUrl}`);
+            
+            // Find existing tab with the course URL
+            const tabs = await chrome.tabs.query({url: courseUrl});
+            let courseTab = tabs[0];
+
+            if (courseTab) {
+                console.log(`Found existing course tab ${courseTab.id}`);
+                await chrome.tabs.update(courseTab.id, { active: true });
+                await chrome.tabs.reload(courseTab.id);
+            } else {
+                console.log('Creating new course tab');
+                courseTab = await chrome.tabs.create({ 
+                    url: courseUrl,
+                    active: true
+                });
+            }
+
+            return courseTab;
+        } catch (error) {
+            console.error('Error finding/creating course tab:', error);
+            throw error;
+        }
+    }
+
+    async storeSyllabusData(courseId, syllabusData) {
+        try {
+            const result = await chrome.storage.local.get(['syllabi']);
+            const syllabi = result.syllabi || {};
+            
+            syllabi[courseId] = {
+                ...syllabusData,
+                lastUpdated: Date.now()
+            };
+            
+            await chrome.storage.local.set({ syllabi });
+            console.log(`Stored syllabus for course ${courseId}`);
+            console.log(`Stored syllabus for course ${courseId}`);
+            // PREVIEW LOG HERE
+            console.log('Syllabus Preview:', (syllabusData.content || '').substring(0, 200) + '...' // Safe access
+            );
+            } catch (error) {
+            console.error('Error storing syllabus data:', error);
+        }
+    }
+
+    async getSyllabusData(courseId) {
+        try {
+            const result = await chrome.storage.local.get(['syllabi']);
+            return result.syllabi?.[courseId] || null;
+        } catch (error) {
+            console.error('Error retrieving syllabus data:', error);
+            return null;
+        }
     }
     
     async findOrCreateBrightspaceTab() {
@@ -776,6 +897,119 @@ class StudySyncBackground {
             console.log('StudySync Enhanced updated');
         }
     }
+}
+
+function getSyllabusScraperFunction() {
+    return async function() {
+        try {
+            console.log('Syllabus Scraper: Starting syllabus extraction...');
+            
+            // Wait for page to be fully loaded
+            await new Promise(resolve => {
+                if (document.readyState === 'complete') {
+                    resolve();
+                } else {
+                    document.addEventListener('DOMContentLoaded', resolve);
+                    setTimeout(resolve, 3000);
+                }
+            });
+
+            // Helper function to traverse shadow DOM
+            function traverseShadowDOM(root, selector) {
+                if (!root || !root.querySelector) return [];
+                
+                const elements = Array.from(root.querySelectorAll(selector));
+                const elementsWithShadowRoots = Array.from(root.querySelectorAll("*"))
+                    .filter(el => el.shadowRoot);
+                
+                for (const el of elementsWithShadowRoots) {
+                    elements.push(...traverseShadowDOM(el.shadowRoot, selector));
+                }
+                
+                return elements;
+            }
+
+            // Function to extract syllabus content from Table of Contents
+            function extractSyllabusContent() {
+                console.log('Syllabus Scraper: Extracting syllabus content...');
+                
+                // 1. First try to find main content container
+                const contentSelectors = [
+                    '.d2l-page-main', 
+                    '.d2l-page-main-padding',
+                    '.d2l-article',
+                    '.d2l-htmlblock'
+                ];
+                
+                let contentContainer = null;
+                for (const selector of contentSelectors) {
+                    contentContainer = document.querySelector(selector);
+                    if (contentContainer) break;
+                }
+
+                // 2. Enhanced keyword detection for your university
+                const syllabusKeywords = [
+                    'syllabus', 'outline', 'course information', 
+                    'course details', 'course description', 'course schedule',
+                    'learning objectives', 'grading scheme', 'required textbook',
+                    'course policies', 'academic regulations'
+                ];
+                
+                // 3. Fallback to TOC only if main content not found
+                if (!contentContainer) {
+                    console.log('Falling back to TOC extraction');
+                    // ... existing TOC extraction code ...
+                }
+                
+                // 4. Extract from main content container
+                let syllabusContent = '';
+                if (contentContainer) {
+                    console.log('Found main content container');
+                    syllabusContent = contentContainer.innerText || contentContainer.textContent;
+                }
+                
+                // 5. Enhanced validation for your screenshot content
+                const hasSyllabusContent = syllabusKeywords.some(keyword => 
+                    syllabusContent.toLowerCase().includes(keyword)
+                );
+                
+                // 6. Specific check for "Course Outline" from your screenshot
+                const hasOutline = syllabusContent.includes('Course Outline') || 
+                                  syllabusContent.includes('Course Details');
+                
+                if (!hasSyllabusContent && !hasOutline) {
+                    throw new Error('No syllabus content detected');
+                }
+
+                if (syllabusContent) {
+                        console.log('Syllabus Preview:', syllabusContent.substring(0, 200) + '...');
+                    } else {
+                        console.warn('No syllabus content extracted');
+                    }
+                return {
+                    title: 'Course Syllabus',
+                    content: syllabusContent.trim() || '', // Ensure content exists
+                    url: window.location.href,
+                    extractedAt: new Date().toISOString()
+                };
+            }
+
+            // Extract content
+            const syllabusResult  = extractSyllabusContent();
+            
+            return {
+                success: true,
+                syllabus: syllabusResult
+            };
+
+        } catch (error) {
+            console.error('Syllabus Scraper: Error extracting syllabus:', error);
+            return {
+                success: false,
+                error: error.message
+            };
+        }
+    };
 }
 
 function getbrightspaceScraperFunction() {
@@ -1261,4 +1495,3 @@ chrome.storage.local.get(['scrapedCourses'], (result) => {
 chrome.storage.local.get(null, function(data) {
   console.log('All stored data:', data);
 });
-

@@ -613,12 +613,6 @@ class StudySyncApp {
         return icons[mostCommonType] || icons.default;
     }
 
-// Then update the loadCourses method to use it:
-// Change this line:
-// <div class="course-icon">${course.icon || '📚'}</div>
-// To:
-// <div class="course-icon">${this.getCourseIcon(course)}</div>
-    // Brightspace Integration
     async syncBrightspace() {
         if (!this.termsAccepted) {
             this.showTermsModal();
@@ -737,11 +731,22 @@ class StudySyncApp {
 
         // Add click handlers for course cards
         coursesEl.querySelectorAll('.course-card').forEach(card => {
-            card.addEventListener('click', () => {
-                const courseId = card.dataset.courseId;
-                const course = this.studyData.courses.find(c => c.courseId === courseId);
-                if (course && course.url) {
-                    chrome.tabs.create({ url: course.url });
+            card.addEventListener('click', (e) => {
+                // Check if the click was on the action button
+                if (e.target.closest('.course-action-btn')) {
+                    e.stopPropagation();
+                    const courseId = card.dataset.courseId;
+                    const course = this.studyData.courses.find(c => c.courseId === courseId);
+                    if (course && course.url) {
+                        chrome.tabs.create({ url: course.url });
+                    }
+                } else {
+                    // Show course options modal
+                    const courseId = card.dataset.courseId;
+                    const course = this.studyData.courses.find(c => c.courseId === courseId);
+                    if (course) {
+                        this.showCourseOptionsModal(course);
+                    }
                 }
             });
         });
@@ -855,6 +860,227 @@ class StudySyncApp {
         }
         
         return insights;
+    }
+
+    showCourseOptionsModal(course) {
+        const modal = document.createElement('div');
+        modal.className = 'modal course-options-modal';
+        modal.innerHTML = `
+            <div class="modal-overlay"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>${course.code} - ${course.name}</h3>
+                    <button class="modal-close-btn">&times;</button>
+                </div>
+                <div class="course-options">
+                    <button class="option-btn" data-action="open-course">
+                        <span class="icon">🔗</span>
+                        <div class="option-info">
+                            <span class="option-title">Open Course</span>
+                            <span class="option-desc">Go to course in Brightspace</span>
+                        </div>
+                    </button>
+                    <button class="option-btn" data-action="view-syllabus">
+                        <span class="icon">📋</span>
+                        <div class="option-info">
+                            <span class="option-title">View Syllabus</span>
+                            <span class="option-desc">Read course syllabus</span>
+                        </div>
+                    </button>
+                    <button class="option-btn" data-action="scrape-syllabus">
+                        <span class="icon">🔄</span>
+                        <div class="option-info">
+                            <span class="option-title">Update Syllabus</span>
+                            <span class="option-desc">Fetch latest syllabus from Brightspace</span>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Add event listeners
+        modal.querySelector('.modal-close-btn').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        
+        modal.querySelector('.modal-overlay').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        
+        modal.querySelectorAll('.option-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const action = btn.dataset.action;
+                document.body.removeChild(modal);
+                
+                switch (action) {
+                    case 'open-course':
+                        if (course.url) {
+                            chrome.tabs.create({ url: course.url });
+                        }
+                        break;
+                    case 'view-syllabus':
+                        await this.viewSyllabus(course);
+                        break;
+                    case 'scrape-syllabus':
+                        await this.scrapeSyllabus(course);
+                        break;
+                }
+            });
+        });
+    }
+    
+    async viewSyllabus(course) {
+        this.showLoading('Loading syllabus...');
+        
+        try {
+            // Check if we have cached syllabus data
+            const result = await chrome.storage.local.get(['syllabi']);
+            const syllabi = result.syllabi || {};
+            const syllabusData = syllabi[course.courseId];
+            
+            if (syllabusData) {
+                console.log("Syllabus data from cache in viewSyllabus:", syllabusData);
+                this.hideLoading();
+                this.showSyllabusModal(course, syllabusData);
+            } else {
+                // No cached syllabus, offer to scrape it
+                this.hideLoading();
+                const shouldScrape = confirm("No syllabus found for this course. Would you like to fetch it from Brightspace?");
+                if (shouldScrape) {
+                    await this.scrapeSyllabus(course);
+                }
+            }
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error loading syllabus', 'error');
+            console.error('Error viewing syllabus:', error);
+        }
+    }
+    
+    async scrapeSyllabus(course) {
+        this.showLoading('Fetching syllabus from Brightspace...');
+        
+        try {
+            const response = await chrome.runtime.sendMessage({
+                action: 'scrapeSyllabus',
+                courseUrl: course.url,
+                courseId: course.courseId
+            });
+            
+            this.hideLoading();
+            
+            if (response.success) {
+                console.log("Syllabus data from scrapeSyllabus response:", response.syllabus);
+                this.showToast("Syllabus updated successfully!", "success");
+                this.showSyllabusModal(course, response.syllabus);
+            } else {
+                this.showToast("Failed to fetch syllabus: " + response.error, "error");
+            }
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error fetching syllabus', 'error');
+            console.error('Error scraping syllabus:', error);
+        }
+    }
+    
+    showSyllabusModal(course, syllabusData) {
+        console.log("Syllabus Data received in showSyllabusModal:", syllabusData);
+        const modal = document.createElement("div");
+        modal.className = 'modal syllabus-modal';
+        
+        let contentHtml = '';
+        
+        if (syllabusData.isPDF) {
+            // Handle PDF syllabus
+            contentHtml = `
+                <div class="syllabus-body">
+                    <div class="syllabus-meta">
+                        <span class="syllabus-title">${syllabusData.title || 'Course Syllabus (PDF)'}</span>
+                    </div>
+                    <div class="syllabus-text">
+                        <p>The syllabus is available as a PDF document.</p>
+                        <a href="${syllabusData.url}" target="_blank" class="pdf-link">Open PDF Syllabus</a>
+                        <p class="pdf-notice">Note: PDF content cannot be displayed inline</p>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Handle HTML syllabus
+            contentHtml = `
+                <div class="syllabus-body">
+                    <div class="syllabus-meta">
+                        <span class="syllabus-title">${syllabusData.title || 'Course Syllabus'}</span>
+                        <span class="syllabus-date">Last updated: ${syllabusData.extractedAt ? new Date(syllabusData.extractedAt).toLocaleDateString() : 'Unknown'}</span>
+                    </div>
+                    <div class="syllabus-text">
+                        ${this.formatSyllabusContent(syllabusData.content)}
+                    </div>
+                </div>
+            `;
+        }
+        
+        modal.innerHTML = `
+            <div class="modal-overlay"></div>
+            <div class="modal-content syllabus-content">
+                <div class="modal-header">
+                    <h3>${course.code} - Syllabus</h3>
+                    <button class="modal-close-btn">&times;</button>
+                </div>
+                ${contentHtml}
+                <div class="modal-actions">
+                    <button class="secondary-btn" id="refresh-syllabus">
+                        <span class="icon">🔄</span>
+                        Refresh
+                    </button>
+                    <button class="primary-btn" id="close-syllabus">Close</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Add event listeners
+        modal.querySelector('.modal-close-btn').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        
+        modal.querySelector('.modal-overlay').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        
+        modal.querySelector('#close-syllabus').addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+        
+        modal.querySelector('#refresh-syllabus').addEventListener('click', async () => {
+            document.body.removeChild(modal);
+            await this.scrapeSyllabus(course);
+        });
+    }
+    
+    formatSyllabusContent(content) {
+        if (!content) return '<p>No content available</p>';
+        
+        // Split into meaningful sections
+        return content
+            .split(/\n/)
+            .filter(line => line.trim().length > 0)
+            .map(line => {
+                // Format section headers
+                if (line.match(/^[A-Z][A-Z\s]+:$/) || 
+                    line.match(/^[A-Z][a-z\s]+:$/) || 
+                    line.endsWith(':')) {
+                    return `<h4>${line}</h4>`;
+                }
+                // Format list items
+                if (line.startsWith('- ') || line.startsWith('* ') || line.startsWith('• ')) {
+                    return `<li>${line.substring(2)}</li>`;
+                }
+                return `<p>${line}</p>`;
+            })
+            .join('');
     }
 
     // Utility Functions
