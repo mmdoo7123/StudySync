@@ -360,7 +360,64 @@ class StudySyncBackground {
                     await this.clearSessionData();
                     sendResponse({ success: true });
                     break;
-                
+
+                case 'openSyllabusPdf':
+                    try {
+                        const syllabus = await this.getSyllabusData(request.courseId);
+                        if (syllabus?.outlinePdfUrl) {
+                            // Check if this is first open
+                            if (!syllabus.opened) {
+                                // Show confirmation request
+                                chrome.runtime.sendMessage({
+                                    action: 'confirmSyllabusOpen',
+                                    courseId: request.courseId
+                                });
+                                sendResponse({ success: true, requiresConfirmation: true });
+                            } else {
+                                // Already confirmed - open directly
+                                const pdfUrl = `${syllabus.outlinePdfUrl}?authToken=${this.sessionData.token}`;
+                                chrome.tabs.create({ url: pdfUrl });
+                                sendResponse({ success: true });
+                            }
+                        } else {
+                            sendResponse({ success: false, error: 'No PDF available' });
+                        }
+                    } catch (error) {
+                        sendResponse({ success: false, error: error.message });
+                    }
+                    break;
+
+                    case 'getAllCourses':
+                        try {
+                            const courses = await this.getAllCourses();
+                            sendResponse({ courses });
+                        } catch (error) {
+                            sendResponse({ success: false, error: error.message });
+                        }
+                        break;
+
+                    case 'confirmSyllabusOpenResponse':
+                        if (request.confirmed) {
+                            const syllabus = await this.getSyllabusData(request.courseId);
+                            if (syllabus) {
+                                // Update syllabus as opened
+                                const result = await chrome.storage.local.get(['syllabi']);
+                                const syllabi = result.syllabi || {};
+                                syllabi[request.courseId] = {
+                                    ...syllabus,
+                                    opened: true
+                                };
+                                await chrome.storage.local.set({ syllabi });
+                                
+                                // Open the PDF
+                                const pdfUrl = `${syllabus.outlinePdfUrl}?authToken=${this.sessionData.token}`;
+                                chrome.tabs.create({ url: pdfUrl });
+                            }
+                        }
+                        sendResponse({ success: true });
+                        break;
+
+
                 default:
                     console.log('Unknown action:', request.action);
                     sendResponse({ success: false, error: 'Unknown action' });
@@ -543,7 +600,9 @@ class StudySyncBackground {
             
             // Save and respond ONCE
             await this.saveScrapedData(scrapedData.courses);
-            
+            for (const course of scrapedData.courses) {
+                await this.storeCourseData(course);
+            }
             sendResponse({ 
                 success: true, 
                 courses: scrapedData.courses,
@@ -562,7 +621,9 @@ class StudySyncBackground {
     }
 
     async handleSyllabusScraping(courseUrl, courseId, sendResponse) {
+       
         try {
+            
             // Construct CORRECT syllabus URL
             const syllabusUrl = `${this.brightspaceBaseUrl}/d2l/le/content/${courseId}/Home?itemIdentifier=Syllabus`;
             console.log(`Starting syllabus scraping for course ${courseId} at ${syllabusUrl}`);
@@ -620,6 +681,25 @@ class StudySyncBackground {
         }
     }
 
+    async storeAllCourses(coursesArray) {
+        try {
+            const courses = {};
+            for (const course of coursesArray) {
+                courses[course.courseId] = {
+                    name: course.name,
+                    code: course.code,
+                    url: course.url,
+                    term: course.term,
+                    lastUpdated: Date.now()
+                };
+            }
+            await chrome.storage.local.set({ courses });
+            console.log(`Stored ${coursesArray.length} courses in bulk`);
+        } catch (error) {
+            console.error('Error storing all courses:', error);
+        }
+    }
+
     async findOrCreateCourseTab(courseUrl) {
         try {
             console.log(`Finding or creating tab for course: ${courseUrl}`);
@@ -652,15 +732,22 @@ class StudySyncBackground {
             const result = await chrome.storage.local.get(['syllabi']);
             const syllabi = result.syllabi || {};
             
-            syllabi[courseId] = {
-                ...syllabusData,
+            const existing = syllabi[courseId] || {};
+
+             syllabi[courseId] = {
+                ...existing, // existing data (including opened flag)
+                ...syllabusData, // new data from scraping
                 lastUpdated: Date.now()
             };
             
             await chrome.storage.local.set({ syllabi });
-            console.log(`Stored syllabus for course ${courseId}`);
-            console.log(`Stored syllabus for course ${courseId}`);
-            // PREVIEW LOG HERE
+            console.log(`Stored syllabus for course ${courseId}`, {
+                title: syllabusData.title,
+                opened: syllabi[courseId].opened, // Log opened status
+                contentLength: syllabusData.content?.length || 0,
+                pdfUrl: syllabusData.outlinePdfUrl || 'None',
+                hasPdf: !!syllabusData.outlinePdfUrl
+            });
             console.log('Syllabus Preview:', (syllabusData.content || '').substring(0, 200) + '...' // Safe access
             );
             } catch (error) {
@@ -882,10 +969,31 @@ class StudySyncBackground {
 
     async getAllCourses() {
         try {
-            const result = await chrome.storage.local.get(['courses']);
-            return result.courses || {};
+            const result = await chrome.storage.local.get(['courses', 'scrapedCourses']);
+            // Return courses if they exist
+            if (result.courses) {
+                return result.courses;
+            }
+            // Fallback to scrapedCourses if courses doesn't exist
+            if (result.scrapedCourses) {
+                const courses = {};
+                for (const course of result.scrapedCourses) {
+                    // FIX: Ensure we have a valid courseId
+                    const courseId = course.courseId || `course_${Math.random().toString(36).substr(2, 9)}`;
+                    
+                    courses[courseId] = {
+                        name: course.name,
+                        code: course.code,
+                        url: course.url,
+                        term: course.term
+                    };
+                }
+                await chrome.storage.local.set({ courses });
+                return courses;
+            }
+            return {};
         } catch (error) {
-            console.error('Error retrieving all courses:', error);
+            console.error('Error retrieving courses:', error);
             return {};
         }
     }
@@ -899,6 +1007,7 @@ class StudySyncBackground {
     }
 }
 
+//  syllabus scraper function
 function getSyllabusScraperFunction() {
     return async function() {
         try {
@@ -906,96 +1015,146 @@ function getSyllabusScraperFunction() {
             
             // Wait for page to be fully loaded
             await new Promise(resolve => {
-                if (document.readyState === 'complete') {
-                    resolve();
-                } else {
+                if (document.readyState === 'complete') resolve();
+                else {
                     document.addEventListener('DOMContentLoaded', resolve);
-                    setTimeout(resolve, 3000);
+                    setTimeout(resolve, 5000);
                 }
             });
 
-            // Helper function to traverse shadow DOM
-            function traverseShadowDOM(root, selector) {
-                if (!root || !root.querySelector) return [];
-                
-                const elements = Array.from(root.querySelectorAll(selector));
-                const elementsWithShadowRoots = Array.from(root.querySelectorAll("*"))
-                    .filter(el => el.shadowRoot);
-                
-                for (const el of elementsWithShadowRoots) {
-                    elements.push(...traverseShadowDOM(el.shadowRoot, selector));
-                }
-                
-                return elements;
-            }
-
-            // Function to extract syllabus content from Table of Contents
-            function extractSyllabusContent() {
+            // Define extractSyllabusContent WITHIN this function
+            const extractSyllabusContent = function() {
                 console.log('Syllabus Scraper: Extracting syllabus content...');
                 
-                // 1. First try to find main content container
-                const contentSelectors = [
-                    '.d2l-page-main', 
-                    '.d2l-page-main-padding',
-                    '.d2l-article',
-                    '.d2l-htmlblock'
-                ];
-                
-                let contentContainer = null;
-                for (const selector of contentSelectors) {
-                    contentContainer = document.querySelector(selector);
-                    if (contentContainer) break;
-                }
-
-                // 2. Enhanced keyword detection for your university
-                const syllabusKeywords = [
-                    'syllabus', 'outline', 'course information', 
-                    'course details', 'course description', 'course schedule',
-                    'learning objectives', 'grading scheme', 'required textbook',
-                    'course policies', 'academic regulations'
-                ];
-                
-                // 3. Fallback to TOC only if main content not found
-                if (!contentContainer) {
-                    console.log('Falling back to TOC extraction');
-                    // ... existing TOC extraction code ...
-                }
-                
-                // 4. Extract from main content container
+                // Target the main syllabus container
                 let syllabusContent = '';
-                if (contentContainer) {
-                    console.log('Found main content container');
-                    syllabusContent = contentContainer.innerText || contentContainer.textContent;
+                let outlinePdfUrl = '';
+                const containerSelectors = [
+                    'div.d2l-page-main',
+                    'div.d2l-consistent-evaluation',
+                    'div.d2l-twopanelselector-wrapper'
+                ];
+                
+                // Find the main syllabus container
+                let container = null;
+                for (const selector of containerSelectors) {
+                    container = document.querySelector(selector);
+                    if (container) break;
                 }
                 
-                // 5. Enhanced validation for your screenshot content
-                const hasSyllabusContent = syllabusKeywords.some(keyword => 
-                    syllabusContent.toLowerCase().includes(keyword)
-                );
-                
-                // 6. Specific check for "Course Outline" from your screenshot
-                const hasOutline = syllabusContent.includes('Course Outline') || 
-                                  syllabusContent.includes('Course Details');
-                
-                if (!hasSyllabusContent && !hasOutline) {
-                    throw new Error('No syllabus content detected');
+                if (!container) {
+                    // Fallback to body if no container found
+                    container = document.body;
                 }
+                
+                // Clone to avoid modifying original DOM
+                const containerClone = container.cloneNode(true);
+                
+                // Remove unwanted UI elements
+                const unwantedSelectors = [
+                    'd2l-navigation', 
+                    'd2l-alert', 
+                    '.d2l-tool-actions',
+                    '.d2l-page-header',
+                    '.d2l-page-footer',
+                    '.d2l-toc',
+                    'd2l-button',
+                    '.d2l-progress',
+                    '.d2l-module-header'
+                ];
+                
+                unwantedSelectors.forEach(selector => {
+                    containerClone.querySelectorAll(selector).forEach(el => el.remove());
+                });
+                
+                // Get clean text content
+                syllabusContent = containerClone.innerText || containerClone.textContent || '';
+                
+                // Clean and format the content
+                syllabusContent = syllabusContent
+                    .replace(/(\d+\.?\d*% (complete|progress)|This Chart).*/gi, '') // Remove progress indicators
+                    .replace(/(Starts|Ends|Available|Access restricted).*/gi, '') // Remove date/access info
+                    .replace(/(module:|sub-modules|Load More|Clear Selection).*/gi, '') // Remove UI labels
+                    .replace(/\d+ of \d+ topics complete/gi, '') // Remove progress text
+                    .replace(/(\n\s*){3,}/g, '\n\n') // Reduce excessive newlines
+                    .replace(/\s{2,}/g, ' ') // Collapse multiple spaces
+                    .trim();
+                
+                // Enhanced PDF detection - fixed version
+                const outlineKeywords = ['course outline', 'syllabus', 'course information'];
+                const allLinks = Array.from(container.querySelectorAll('a[href]'));
 
-                if (syllabusContent) {
-                        console.log('Syllabus Preview:', syllabusContent.substring(0, 200) + '...');
-                    } else {
-                        console.warn('No syllabus content extracted');
+                // Enhanced PDF detection with better matching
+                const pdfLinks = allLinks.filter(link => {
+                    const href = link.href.toLowerCase();
+                    const text = (link.textContent || '').toLowerCase();
+                    
+                    // Check if link points to a PDF
+                    const isPdf = href.endsWith('.pdf') || 
+                                href.includes('/content/') || 
+                                href.includes('/file/');
+                    
+                    // Check if link text contains keywords
+                    const hasKeyword = outlineKeywords.some(kw => 
+                        text.includes(kw) || href.includes(kw)
+                    );
+                    
+                    // Also check for PDF indicators in class names
+                    const classes = link.className.toLowerCase();
+                    const hasPdfClass = classes.includes('pdf') || 
+                                    classes.includes('file') || 
+                                    classes.includes('outline');
+                    
+                    return isPdf && (hasKeyword || hasPdfClass);
+                });
+
+                if (pdfLinks.length > 0) {
+                    outlinePdfUrl = pdfLinks[0].href;
+                    console.log('Found course outline PDF:', outlinePdfUrl);
+                } else {
+                    console.log('No PDF found, falling back to text extraction');
+                    // Fallback: Look for keywords near PDF links
+                    const outlineElements = Array.from(container.querySelectorAll('*')).filter(el => {
+                        const text = (el.textContent || '').toLowerCase();
+                        return outlineKeywords.some(kw => text.includes(kw));
+                    });
+                    
+                    if (outlineElements.length > 0) {
+                        for (const element of outlineElements) {
+                            // Look for PDF links in the same container
+                            const pdfLinksNearby = Array.from(element.closest('div, li, tr')?.querySelectorAll('a[href$=".pdf"]') || []);
+                            if (pdfLinksNearby.length > 0) {
+                                outlinePdfUrl = pdfLinksNearby[0].href;
+                                console.log('Found course outline PDF near keyword:', outlinePdfUrl);
+                                break;
+                            }
+                        }
                     }
+                }
+                
+                // Extract title
+                let title = document.title
+                    .replace(/Table of Contents\s*-?\s*/i, '')
+                    .replace(/Brightspace\s*/, '')
+                    .trim();
+                
                 return {
-                    title: 'Course Syllabus',
-                    content: syllabusContent.trim() || '', // Ensure content exists
-                    url: window.location.href,
+                    title: title || 'Course Syllabus',
+                    content: syllabusContent || '',
+                    outlinePdfUrl: outlinePdfUrl || '',
+                    url: location.href,
                     extractedAt: new Date().toISOString()
                 };
-            }
+            };
 
-            // Extract content
-            const syllabusResult  = extractSyllabusContent();
+            // Extract content using the locally defined function
+            const syllabusResult = extractSyllabusContent();
+            
+            // Log preview of extracted content
+            console.log('Syllabus Preview:', 
+                syllabusResult.content.substring(0, 200) + 
+                (syllabusResult.content.length > 200 ? '...' : '')
+            );
             
             return {
                 success: true,
@@ -1417,7 +1576,6 @@ function getbrightspaceScraperFunction() {
         }
     };
 }
-
 
 
 async function handleAuthentication() {

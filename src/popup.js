@@ -144,7 +144,11 @@ class StudySyncApp {
         });
         document.getElementById('agree-btn')?.addEventListener('click', () => this.acceptTerms());
         document.getElementById('decline-btn')?.addEventListener('click', () => this.declineTerms());
-
+    
+        //trigger refresh
+        document.getElementById('refresh-courses-btn')?.addEventListener('click', 
+            () => this.loadCourses()
+        );
         // Analytics filters
         document.querySelectorAll('.filter-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
@@ -661,12 +665,25 @@ class StudySyncApp {
         }
     }
 
-    loadCourses() {
+    async fetchAllCourses() {
+        try {
+            const response = await chrome.runtime.sendMessage({ action: 'getAllCourses' });
+            return response.courses || [];
+        } catch (error) {
+            console.error('Error fetching courses:', error);
+            return [];
+        }
+    }
+
+    async loadCourses() {
         const coursesEl = document.getElementById('courses-list');
         const termHeader = document.getElementById('term-header');
         const subjectSelect = document.getElementById('study-subject');
         
         if (!coursesEl) return;
+        
+         // USE LOCAL COURSES INSTEAD OF FETCHING
+        const courses = this.studyData.courses || []; 
         
         // Update term header with current term if available
         if (termHeader) {
@@ -674,15 +691,14 @@ class StudySyncApp {
                 ? `<h2>My Courses - ${this.studyData.currentTerm}</h2>`
                 : '<h2>My Courses</h2>';
         }
-
-         // Clear and rebuild subject dropdown
+        // Clear and rebuild subject dropdown
         if (subjectSelect) {
             // Keep the first "Select Subject" option
             subjectSelect.innerHTML = '<option value="">Select Subject</option>';
         }
 
         // Show placeholder if no courses
-        if (!this.studyData.courses || this.studyData.courses.length === 0) {
+        if (courses.length === 0) {
             coursesEl.innerHTML = `
                 <div class="course-card placeholder">
                     <div class="course-icon">📚</div>
@@ -696,17 +712,17 @@ class StudySyncApp {
         }
 
         // Create course cards and populate subject dropdown
-        const coursesHTML = this.studyData.courses.map(course => {
+        const coursesHTML = courses.map(course => {
             // Add course to subject dropdown
             if (subjectSelect) {
                 const option = document.createElement('option');
                 option.value = course.code || course.name;
-                option.textContent = `${course.code} - ${course.name}`;
+                option.textContent = this.getCourseDisplayName(course);
                 subjectSelect.appendChild(option);
             }
 
             return `
-                <div class="course-card" data-course-id="${course.courseId}">
+                <div class="course-card" data-course-id="${course.courseId || course.id}">
                     <div class="course-icon">${this.getCourseIcon(course)}</div>
                     <div class="course-info">
                         <h3>${course.code || 'Course'}</h3>
@@ -736,24 +752,24 @@ class StudySyncApp {
                 if (e.target.closest('.course-action-btn')) {
                     e.stopPropagation();
                     const courseId = card.dataset.courseId;
-                    const course = this.studyData.courses.find(c => c.courseId === courseId);
+                    const course = courses.find(c => c.courseId === courseId);
                     if (course && course.url) {
                         chrome.tabs.create({ url: course.url });
                     }
                 } else {
                     // Show course options modal
                     const courseId = card.dataset.courseId;
-                    const course = this.studyData.courses.find(c => c.courseId === courseId);
+                    const course = courses.find(c => c.courseId === courseId);
                     if (course) {
                         this.showCourseOptionsModal(course);
                     }
                 }
             });
         });
-        
-        // Update the study subject dropdown with loaded courses
-        this.updateStudySubjectDropdown();
-    }
+            
+            // Update the study subject dropdown with loaded courses
+            this.updateStudySubjectDropdown();
+        }
 
     truncateCourseName(name, maxLength = 30) {
         if (!name) return '';
@@ -862,9 +878,21 @@ class StudySyncApp {
         return insights;
     }
 
-    showCourseOptionsModal(course) {
+    async showCourseOptionsModal(course) {
+        // Get syllabus data asynchronously
+        let hasPDF = false;
+        try {
+            const result = await chrome.storage.local.get(['syllabi']);
+            const syllabi = result.syllabi || {};
+            const syllabusData = syllabi[course.courseId];
+            hasPDF = !!syllabusData?.outlinePdfUrl;
+        } catch (error) {
+            console.error('Error fetching syllabus data:', error);
+        }
+
         const modal = document.createElement('div');
         modal.className = 'modal course-options-modal';
+        
         modal.innerHTML = `
             <div class="modal-overlay"></div>
             <div class="modal-content">
@@ -881,10 +909,12 @@ class StudySyncApp {
                         </div>
                     </button>
                     <button class="option-btn" data-action="view-syllabus">
-                        <span class="icon">📋</span>
-                        <div class="option-info">
-                            <span class="option-title">View Syllabus</span>
-                            <span class="option-desc">Read course syllabus</span>
+                                <span class="icon">${hasPDF ? '📄' : '📋'}</span>
+                                <div class="option-info">
+                                    <span class="option-title">View Syllabus</span>
+                                    <span class="option-desc">
+                                        ${hasPDF ? 'Open PDF syllabus' : 'Read text syllabus'}
+                                    </span>
                         </div>
                     </button>
                     <button class="option-btn" data-action="scrape-syllabus">
@@ -963,52 +993,49 @@ class StudySyncApp {
         this.showLoading('Fetching syllabus from Brightspace...');
         
         try {
-            const response = await chrome.runtime.sendMessage({
-                action: 'scrapeSyllabus',
-                courseUrl: course.url,
-                courseId: course.courseId
-            });
-            
-            this.hideLoading();
-            
-            if (response.success) {
-                console.log("Syllabus data from scrapeSyllabus response:", response.syllabus);
-                this.showToast("Syllabus updated successfully!", "success");
-                this.showSyllabusModal(course, response.syllabus);
-            } else {
-                this.showToast("Failed to fetch syllabus: " + response.error, "error");
+                const response = await chrome.runtime.sendMessage({
+                    action: 'scrapeSyllabus',
+                    courseUrl: course.url,
+                    courseId: course.courseId
+                });
+                
+                this.hideLoading();
+                
+                if (response.success) {
+                    this.showToast("Syllabus updated successfully!", "success");
+                    // Now show the syllabus using the view method
+                    await this.viewSyllabus(course);
+                } else {
+                    this.showToast("Failed to fetch syllabus: " + response.error, "error");
+                }
+            } catch (error) {
+                this.hideLoading();
+                this.showToast('Error fetching syllabus', 'error');
+                console.error('Error scraping syllabus:', error);
             }
-        } catch (error) {
-            this.hideLoading();
-            this.showToast('Error fetching syllabus', 'error');
-            console.error('Error scraping syllabus:', error);
-        }
     }
     
     showSyllabusModal(course, syllabusData) {
         console.log("Syllabus Data received in showSyllabusModal:", syllabusData);
+        
+        // Check if PDF is available
+        if (syllabusData.outlinePdfUrl) {
+            // Open PDF directly in new tab
+            chrome.tabs.create({ url: syllabusData.outlinePdfUrl });
+            return;
+        }
+        
+        // If no PDF, show text content modal
         const modal = document.createElement("div");
         modal.className = 'modal syllabus-modal';
         
-        let contentHtml = '';
-        
-        if (syllabusData.isPDF) {
-            // Handle PDF syllabus
-            contentHtml = `
-                <div class="syllabus-body">
-                    <div class="syllabus-meta">
-                        <span class="syllabus-title">${syllabusData.title || 'Course Syllabus (PDF)'}</span>
-                    </div>
-                    <div class="syllabus-text">
-                        <p>The syllabus is available as a PDF document.</p>
-                        <a href="${syllabusData.url}" target="_blank" class="pdf-link">Open PDF Syllabus</a>
-                        <p class="pdf-notice">Note: PDF content cannot be displayed inline</p>
-                    </div>
+        modal.innerHTML = `
+            <div class="modal-overlay"></div>
+            <div class="modal-content syllabus-content">
+                <div class="modal-header">
+                    <h3>${course.code} - Syllabus</h3>
+                    <button class="modal-close-btn">&times;</button>
                 </div>
-            `;
-        } else {
-            // Handle HTML syllabus
-            contentHtml = `
                 <div class="syllabus-body">
                     <div class="syllabus-meta">
                         <span class="syllabus-title">${syllabusData.title || 'Course Syllabus'}</span>
@@ -1018,17 +1045,6 @@ class StudySyncApp {
                         ${this.formatSyllabusContent(syllabusData.content)}
                     </div>
                 </div>
-            `;
-        }
-        
-        modal.innerHTML = `
-            <div class="modal-overlay"></div>
-            <div class="modal-content syllabus-content">
-                <div class="modal-header">
-                    <h3>${course.code} - Syllabus</h3>
-                    <button class="modal-close-btn">&times;</button>
-                </div>
-                ${contentHtml}
                 <div class="modal-actions">
                     <button class="secondary-btn" id="refresh-syllabus">
                         <span class="icon">🔄</span>
