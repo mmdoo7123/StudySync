@@ -1,6 +1,6 @@
 {
   "name": "StudySync Ottawa",
-  "version": "3.0",
+  "version": "3.1.0",
   "manifest_version": 3,
   "description": "Professional study companion with Brightspace integration, analytics, and productivity tracking",
   "permissions": [
@@ -11,6 +11,7 @@
     "tabs",
     "cookies",
     "notifications",
+    "downloads",
     "alarms"
   ],
   "host_permissions": [
@@ -23,7 +24,9 @@
     "https://uottawa.brightspace.com/*",
     "https://brightspace.uottawa.ca/*",
     "https://login.microsoftonline.com/*",
-    "https://*.d2l.com/*"
+    "https://*.d2l.com/*",
+    "https://cdnjs.cloudflare.com/*"
+
   ],
   "optional_host_permissions": [
     "*://*/*"

@@ -41,7 +41,76 @@ class DeadlineProcessor {
             confidence: 0.3
         };
     }
+    // Enhanced deadline extraction for PDF content
+    extractDeadlinesFromText(content) {
+        console.log('Extracting deadlines from PDF text content...');
+        const deadlines = new Set(); // Use Set to avoid duplicates
+        
+        // Enhanced patterns for PDF content
+        const deadlinePatterns = [
+            // Table format: "Assignment 1 | Individual | 15% | September 15, 2024"
+            /([A-Za-z\s\d-]+?)\s*\|\s*[A-Za-z\s]+\s*\|\s*\d{1,3}%\s*\|\s*(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+            
+            // Assignment with dash: "Assignment 1 - Due September 15, 2024"
+            /(\b(?:Assignment|Lab|Midterm|Exam|Project|Report|Quiz|Test)\s*\d*)\s*[-–—]\s*(?:Due\s*)?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+            
+            // Date with time: "September 15, 2024 at 11:59 PM"
+            /(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}\s+at\s+\d{1,2}:\d{2}\s+[AP]M)/gi,
+            
+            // Course end dates
+            /(course\s*ends?|term\s*ends?|semester\s*ends?|final\s*exam)[\s\S]*?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+            
+            // Due dates in natural language
+            /(?:due|deadline|submit|hand\s+in)[\s\S]*?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+            
+            // Standalone dates that might be deadlines
+            /(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi
+        ];
 
+        // Extract deadlines using patterns
+        for (const pattern of deadlinePatterns) {
+            let match;
+            while ((match = pattern.exec(content)) !== null) {
+                const context = (match[1] || '').trim();
+                const dateText = (match[2] || match[1] || '').trim();
+                
+                if (dateText && this.isValidDateText(dateText)) {
+                    let deadlineText;
+                    
+                    if (context && context !== dateText && !context.toLowerCase().includes('due')) {
+                        deadlineText = `${context}: ${dateText}`;
+                    } else {
+                        deadlineText = dateText;
+                    }
+                    
+                    // Clean up text
+                    deadlineText = deadlineText
+                        .replace(/\s+/g, ' ')
+                        .replace(/\|\s*/g, '')
+                        .replace(/\b(?:Due|due)\s*:?\s*/gi, '')
+                        .trim();
+                    
+                    deadlines.add(deadlineText);
+                }
+            }
+        }
+
+        const uniqueDeadlines = Array.from(deadlines);
+        console.log(`Found ${uniqueDeadlines.length} unique deadlines in PDF text`);
+        return uniqueDeadlines;
+    }
+
+    isValidDateText(dateText) {
+        // Check if the date text contains a valid month and reasonable day/year
+        const months = ['january', 'february', 'march', 'april', 'may', 'june',
+                    'july', 'august', 'september', 'october', 'november', 'december'];
+        
+        const lowerText = dateText.toLowerCase();
+        const hasMonth = months.some(month => lowerText.includes(month));
+        const hasDay = /\d{1,2}/.test(dateText);
+        
+        return hasMonth && hasDay;
+    }
     calculateConfidence(text, keyword) {
         const words = text.split(/\s+/);
         const keywordIndex = words.findIndex(word => word.includes(keyword));
@@ -68,8 +137,9 @@ class DeadlineProcessor {
         };
     }
 
-    extractDate(text) {
+     extractDate(text) {
         const datePatterns = [
+            /(\w+\s+\d{1,2},\s+\d{4} at \d{1,2}:\d{2} [AP]M)/gi, // Added pattern for "Month DD, YYYY at HH:MM AM/PM"
             /(\w+\s+\d{1,2},\s+\d{4})/g,
             /(\d{1,2}\/\d{1,2}\/\d{4})/g,
             /(\d{4}-\d{2}-\d{2})/g,
@@ -80,6 +150,10 @@ class DeadlineProcessor {
             const match = text.match(pattern);
             if (match) {
                 const dateStr = match[0];
+                // Handle the new format with time
+                if (pattern.source.includes('at')) {
+                    return new Date(dateStr.replace(' at', ','));
+                }
                 const parsedDate = new Date(dateStr);
                 if (!isNaN(parsedDate.getTime())) {
                     return parsedDate;
@@ -90,8 +164,8 @@ class DeadlineProcessor {
     }
 
     extractTitle(text) {
-        let title = text.replace(/^(due|deadline|assignment|quiz|exam):\s*/i, '');
-        title = title.replace(/\s*(due|deadline)\s*:.*$/i, '');
+        let title = text.replace(/^(due|deadline|ends|assignment|quiz|exam):?\s*/i, ''); // Added "ends"
+        title = title.replace(/\s*(due|deadline|ends)\s*:.*$/i, '');
         title = title.replace(/\s*-\s*\w+\s+\d{1,2}(,\s+\d{4})?.*$/i, '');
         title = title.replace(/\s*\d{1,2}\/\d{1,2}\/\d{4}.*$/i, '');
         return title.trim();
@@ -227,6 +301,81 @@ class ChangeDetector {
     }
 }
 
+// Enhanced PDF Text Extractor Class
+class PdfTextExtractor {
+    constructor() {
+        this.pdfjsLoaded = false;
+    }
+
+    async loadPdfJs() {
+        if (this.pdfjsLoaded) return;
+        
+        try {
+            // Load PDF.js library if not already loaded
+            if (typeof pdfjsLib === 'undefined') {
+                await this.loadPdfLibrary();
+            }
+            this.pdfjsLoaded = true;
+        } catch (error) {
+            console.error('Failed to load PDF.js:', error);
+            throw error;
+        }
+    }
+
+    async loadPdfLibrary() {
+        return new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+            script.onload = () => {
+                if (typeof pdfjsLib !== 'undefined') {
+                    pdfjsLib.GlobalWorkerOptions.workerSrc = 
+                        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+                    resolve();
+                } else {
+                    reject(new Error('PDF.js failed to load'));
+                }
+            };
+            script.onerror = () => reject(new Error('Failed to load PDF.js script'));
+            document.head.appendChild(script);
+        });
+    }
+
+    async extractTextFromPdfUrl(pdfUrl) {
+        try {
+            console.log('Extracting text from PDF URL:', pdfUrl);
+            
+            const response = await fetch(pdfUrl);
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const pdfBlob = await response.blob();
+            const arrayBuffer = await pdfBlob.arrayBuffer();
+            
+            await this.loadPdfJs();
+            
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let fullText = '';
+
+            console.log(`PDF has ${pdf.numPages} pages`);
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + '\n';
+            }
+            
+            console.log(`Total extracted text: ${fullText.length} characters`);
+            return fullText;
+
+        } catch (error) {
+            console.error('Error extracting text from PDF:', error);
+            throw error;
+        }
+    }
+}
+
 // Main Background Script Class
 class StudySyncBackground {
     constructor() {
@@ -260,8 +409,157 @@ class StudySyncBackground {
         // Load session data on startup
         this.loadSessionData();
         setInterval(() => this.checkSession(), 60 * 1000);
+        this.initPdfMonitoring();
         console.log('StudySync Enhanced Background - Ready!');
     }
+
+    initPdfMonitoring() {
+        // Listen for tab updates to detect PDF opens
+        chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+            if (changeInfo.status === 'complete' && tab.url) {
+                this.checkForPdfSyllabus(tabId, tab.url);
+            }
+        });
+        
+        // Listen for tab creation
+        chrome.tabs.onCreated.addListener((tab) => {
+            if (tab.url) {
+                this.checkForPdfSyllabus(tab.id, tab.url);
+            }
+        });
+    }
+
+    // Check if the URL is a PDF syllabus that should be auto-scraped
+    async checkForPdfSyllabus(tabId, url) {
+        try {
+            // Check if this is a Brightspace PDF URL
+            if (url.includes('brightspace.com') && 
+                url.includes('.pdf') && 
+                url.includes('/content/')) {
+                
+                console.log('Detected PDF syllabus opening:', url);
+                
+                // Add a small delay to ensure PDF is loaded
+                setTimeout(() => {
+                    this.handlePdfSyllabusAutoScrape(tabId, url);
+                }, 2000);
+            }
+        } catch (error) {
+            console.error('Error checking for PDF syllabus:', error);
+        }
+    }
+
+    showPdfScrapeNotification(courseId, deadlineCount, success, errorMessage = '') {
+        try {
+            if (success) {
+                chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icons/ExtensionLogo.png',
+                    title: 'StudySync - PDF Scraped',
+                    message: `✅ Found ${deadlineCount} deadlines in course ${courseId} syllabus`,
+                    priority: 1
+                });
+            } else {
+                chrome.notifications.create({
+                    type: 'basic',
+                    iconUrl: 'icons/ExtensionLogo.png',
+                    title: 'StudySync - PDF Scrape Failed',
+                    message: `❌ Could not scrape PDF for course ${courseId}: ${errorMessage}`,
+                    priority: 1
+                });
+            }
+        } catch (notificationError) {
+            console.error('Failed to show notification:', notificationError);
+        }
+    }
+
+    async handlePdfSyllabusAutoScrape(tabId, pdfUrl) {
+        try {
+            console.log('Auto-scraping PDF syllabus from:', pdfUrl);
+            
+            // Extract course ID from the URL
+            const courseIdMatch = pdfUrl.match(/\/content\/(\d+)\//);
+            if (!courseIdMatch) {
+                console.error('Could not extract course ID from PDF URL');
+                return;
+            }
+            
+            const courseId = courseIdMatch[1];
+            console.log('Detected course ID:', courseId);
+            
+            // Check if we already have syllabus data for this course
+            const existingSyllabus = await this.getSyllabusData(courseId);
+            if (existingSyllabus && existingSyllabus.pdfProcessed) {
+                console.log('PDF already processed for this course');
+                return;
+            }
+            
+            // Initialize PDF extractor
+            const pdfExtractor = new PdfTextExtractor();
+            
+            try {
+                // Extract text from PDF
+                const pdfText = await pdfExtractor.extractTextFromPdfUrl(pdfUrl);
+                
+                if (!pdfText || pdfText.length < 100) {
+                    throw new Error('Insufficient text extracted from PDF');
+                }
+                
+                // Extract deadlines from PDF text
+                const deadlines = this.deadlineProcessor.extractDeadlinesFromText(pdfText);
+                const processedDeadlines = this.deadlineProcessor.processDeadlines(deadlines);
+                
+                // Create or update syllabus data
+                const syllabusData = {
+                    title: `Course Syllabus - ${courseId}`,
+                    content: pdfText,
+                    deadlines: processedDeadlines,
+                    outlinePdfUrl: pdfUrl,
+                    url: pdfUrl,
+                    extractedAt: new Date().toISOString(),
+                    pdfProcessed: true,
+                    autoScraped: true
+                };
+                
+                // Store the syllabus data
+                await this.storeSyllabusData(courseId, syllabusData);
+                
+                console.log(`✅ Auto-scraped PDF syllabus for course ${courseId}:`, {
+                    textLength: pdfText.length,
+                    deadlinesFound: processedDeadlines.length,
+                    deadlines: processedDeadlines.map(d => `${d.title} - ${d.dueDate}`)
+                });
+                
+                // Show success notification
+                this.showPdfScrapeNotification(courseId, processedDeadlines.length, true);
+                
+            } catch (pdfError) {
+                console.error('❌ Could not scrape PDF:', pdfError.message);
+                
+                // Store minimal syllabus data indicating failure
+                const syllabusData = {
+                    title: `Course Syllabus - ${courseId}`,
+                    content: '',
+                    deadlines: [],
+                    outlinePdfUrl: pdfUrl,
+                    url: pdfUrl,
+                    extractedAt: new Date().toISOString(),
+                    pdfProcessed: false,
+                    autoScraped: true,
+                    scrapeError: pdfError.message
+                };
+                
+                await this.storeSyllabusData(courseId, syllabusData);
+                
+                // Show error notification
+                this.showPdfScrapeNotification(courseId, 0, false, pdfError.message);
+            }
+            
+        } catch (error) {
+            console.error('Error in auto PDF scrape:', error);
+        }
+    }
+
     async checkSession() {
         const result = await chrome.storage.local.get(['brightspaceSession']);
         if (result.brightspaceSession && Date.now() > result.brightspaceSession.expiresAt) {
@@ -324,7 +622,38 @@ class StudySyncBackground {
             console.error('Error clearing session data:', error);
         }
     }
-
+    async handleOpenSyllabusPdf(courseId, sendResponse) {
+        try {
+            const syllabus = await this.getSyllabusData(courseId);
+            if (syllabus?.outlinePdfUrl) {
+                // Open the PDF
+                const pdfUrl = syllabus.outlinePdfUrl;
+                const tab = await chrome.tabs.create({ 
+                    url: pdfUrl,
+                    active: true 
+                });
+                
+                // Auto-scrape will be triggered by the tab monitoring
+                console.log(`Opened PDF syllabus for course ${courseId}:`, pdfUrl);
+                
+                sendResponse({ 
+                    success: true, 
+                    message: 'PDF opened, auto-scraping will begin shortly...',
+                    pdfUrl: pdfUrl
+                });
+            } else {
+                sendResponse({ 
+                    success: false, 
+                    error: 'No PDF available for this course' 
+                });
+            }
+        } catch (error) {
+            sendResponse({ 
+                success: false, 
+                error: error.message 
+            });
+        }
+    }
     async handleMessage(request, sender, sendResponse) {
         try {
             console.log('Background received message:', request.action);
@@ -373,7 +702,14 @@ class StudySyncBackground {
                                     courseId: request.courseId
                                 });
                                 sendResponse({ success: true, requiresConfirmation: true });
-                            } else {
+                                if (syllabus.deadlines && syllabus.deadlines.length > 0) {
+                                    console.log(`[Syllabus Deadlines] Course ${request.courseId}:`, 
+                                        syllabus.deadlines);
+                                } else {
+                                    console.log(`[Syllabus Deadlines] No deadlines found for course ${request.courseId}`);
+                                }
+                            }
+                             else {
                                 // Already confirmed - open directly
                                 const pdfUrl = `${syllabus.outlinePdfUrl}?authToken=${this.sessionData.token}`;
                                 chrome.tabs.create({ url: pdfUrl });
@@ -386,6 +722,49 @@ class StudySyncBackground {
                         sendResponse({ success: false, error: error.message });
                     }
                     break;
+
+                    case 'viewSyllabus':
+                        try {
+                            const result = await chrome.storage.local.get(['syllabi']);
+                            const syllabi = result.syllabi || {};
+                            const syllabusData = syllabi[request.courseId];
+                            
+                            if (syllabusData) {
+                                sendResponse({
+                                    success: true,
+                                    syllabusData: syllabusData
+                                });
+                            } else {
+                                sendResponse({
+                                    success: false,
+                                    error: 'No syllabus found for this course'
+                                });
+                            }
+                        } catch (error) {
+                            console.error('Error viewing syllabus:', error);
+                            sendResponse({
+                                success: false,
+                                error: error.message
+                            });
+                        }
+                        break;
+
+                    case 'getSyllabusData':
+                        try {
+                            const result = await chrome.storage.local.get(['syllabi']);
+                            const syllabi = result.syllabi || {};
+                            sendResponse({
+                                success: true,
+                                syllabi: syllabi
+                            });
+                        } catch (error) {
+                            console.error('Error getting syllabus data:', error);
+                            sendResponse({
+                                success: false,
+                                error: error.message
+                            });
+                        }
+                        break;
 
                     case 'getAllCourses':
                         try {
@@ -400,6 +779,10 @@ class StudySyncBackground {
                         if (request.confirmed) {
                             const syllabus = await this.getSyllabusData(request.courseId);
                             if (syllabus) {
+                                if (syllabus.deadlines && syllabus.deadlines.length > 0) {
+                                    console.log(`[Syllabus Deadlines Confirmed] Course ${request.courseId}:`, 
+                                        syllabus.deadlines);
+                                }
                                 // Update syllabus as opened
                                 const result = await chrome.storage.local.get(['syllabi']);
                                 const syllabi = result.syllabi || {};
@@ -743,6 +1126,7 @@ class StudySyncBackground {
             await chrome.storage.local.set({ syllabi });
             console.log(`Stored syllabus for course ${courseId}`, {
                 title: syllabusData.title,
+                deadlines: syllabusData.deadlines?.length || 0, // Add deadlines count
                 opened: syllabi[courseId].opened, // Log opened status
                 contentLength: syllabusData.content?.length || 0,
                 pdfUrl: syllabusData.outlinePdfUrl || 'None',
@@ -938,17 +1322,28 @@ class StudySyncBackground {
             // Get existing courses
             const result = await chrome.storage.local.get(['courses']);
             const courses = result.courses || {};
-            
-            // Update or add the course
+            // Create/update course object while preserving existing deadlines
             courses[course.courseId] = {
+                ...courses[course.courseId], // Keep existing data
                 name: course.name,
                 code: course.code,
                 url: course.url,
                 term: course.term,
-                lastUpdated: Date.now()
+                lastUpdated: Date.now(),
+                // Only update deadlines if new ones exist
+                ...(course.deadlines && course.deadlines.length > 0 ? {
+                    deadlines: [
+                        ...(courses[course.courseId]?.deadlines || []),
+                        ...course.deadlines
+                    ]
+                } : {})
             };
             
-            // Save back to storage
+            if (course.deadlines?.length) {
+                console.log(`Added ${course.deadlines.length} syllabus deadlines to course`);
+            }
+        
+                // Save back to storage
             await chrome.storage.local.set({ courses });
             
             console.log(`Stored course: ${course.code} (${course.courseId})`);
@@ -1009,6 +1404,74 @@ class StudySyncBackground {
 
 //  syllabus scraper function
 function getSyllabusScraperFunction() {
+    function extractDeadlinesFromSyllabus(content) {
+    console.log('Extracting deadlines from syllabus content...');
+    const deadlines = [];
+    
+    // Enhanced patterns to capture deadlines in various formats
+    const deadlinePatterns = [
+        // Pattern 1: Formal assessment tables (like in Course Syllabus.pdf)
+        /(\bAssignment\b|\bLab\b|\bMidterm\b|\bExam\b|\bProject\b|\bReport\b|\bQuiz\b|\bTest\b)[\s\S]*?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+        /(\bAssignment\b|\bLab\b|\bMidterm\b|\bExam\b|\bProject\b|\bReport\b|\bQuiz\b|\bTest\b)[\s\S]*?(\d{1,2}\/\d{1,2}\/\d{4})/gi,
+        
+        // Pattern 2: Course deliverables tables (like in B02 Course Deliverables.pdf)
+        /([A-Za-z\s-]+\b)\s*\|\s*[A-Za-z\s]+\s*\|\s*\d{1,3}%\s*\|\s*(\w+\s+\d{1,2})\b/gi,
+        /([A-Za-z\s-]+\b)\s*\|\s*[A-Za-z\s]+\s*\|\s*\d{1,3}%\s*\|\s*(\d{1,2}\/\d{1,2}\/\d{4})/gi,
+        
+        // Pattern 3: Natural language deadlines
+        /(\bdue\b|\bdeadline\b|\bsubmit\b|\bhand in\b)[\s\S]*?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+        /(\bdue\b|\bdeadline\b|\bsubmit\b|\bhand in\b)[\s\S]*?(\d{1,2}\/\d{1,2}\/\d{4})/gi,
+        /(\bcomplete by\b|\bsubmission\b)[\s\S]*?(\d{1,2}\s+\w+\s+\d{4})/gi,
+        
+        // Pattern 4: Standalone dates in context
+        /(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi,
+        /(\d{1,2}\/\d{1,2}\/\d{4})/g,
+        /(\d{4}-\d{2}-\d{2})/g,
+        /(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/gi
+        
+    ];
+      // Add new pattern for course end dates
+    deadlinePatterns.push(
+        /(course\s*ends?|term\s*ends?|semester\s*ends?)[\s\S]*?(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})/gi
+    );
+    // Extract from tables
+    const tablePattern = /(\bAssignment\b|\bLab\b|\bMidterm\b|\bExam\b|\bProject\b|\bReport\b|\bQuiz\b|\bTest\b)[\s\S]*?\|\s*([\w\s,]+?)\s*\|\s*\d{1,3}%/gi;
+    let tableMatch;
+    
+    while ((tableMatch = tablePattern.exec(content)) !== null) {
+        const title = tableMatch[1].trim();
+        const dateText = tableMatch[2].replace(/\|/g, '').trim();
+        deadlines.push(`${title} - ${dateText}`);
+    }
+
+    // Extract using regex patterns
+    for (const pattern of deadlinePatterns) {
+        let match;
+        while ((match = pattern.exec(content)) !== null) {
+            // Context is the first capture group, date is the second
+            const context = (match[1] || '').trim();
+            const dateText = (match[2] || '').trim();
+            
+            if (dateText) {
+                let deadlineText = context ? `${context}: ${dateText}` : dateText;
+                
+                // Clean up text
+                deadlineText = deadlineText
+                    .replace(/\s+/g, ' ')
+                    .replace(/\|\s*/g, '')
+                    .replace(/\bDue\s*:\s*/i, '')
+                    .trim();
+                
+                if (!deadlines.includes(deadlineText)) {
+                    deadlines.push(deadlineText);
+                }
+            }
+        }
+    }
+
+    console.log(`Found ${deadlines.length} deadlines in syllabus`);
+    return deadlines;
+    }
     return async function() {
         try {
             console.log('Syllabus Scraper: Starting syllabus extraction...');
@@ -1111,6 +1574,8 @@ function getSyllabusScraperFunction() {
                 if (pdfLinks.length > 0) {
                     outlinePdfUrl = pdfLinks[0].href;
                     console.log('Found course outline PDF:', outlinePdfUrl);
+                    const deadlines = extractDeadlinesFromSyllabus(syllabusContent);
+                    console.log(`Found ${deadlines.length} deadlines in syllabus`);
                 } else {
                     console.log('No PDF found, falling back to text extraction');
                     // Fallback: Look for keywords near PDF links
@@ -1138,15 +1603,19 @@ function getSyllabusScraperFunction() {
                     .replace(/Brightspace\s*/, '')
                     .trim();
                 
+                // Extract deadlines from content
+                const deadlines = extractDeadlinesFromSyllabus(syllabusContent);
+                console.log(`Found ${deadlines.length} deadlines in syllabus`);
+                
                 return {
                     title: title || 'Course Syllabus',
                     content: syllabusContent || '',
                     outlinePdfUrl: outlinePdfUrl || '',
+                    deadlines: deadlines,
                     url: location.href,
                     extractedAt: new Date().toISOString()
                 };
             };
-
             // Extract content using the locally defined function
             const syllabusResult = extractSyllabusContent();
             
@@ -1170,6 +1639,7 @@ function getSyllabusScraperFunction() {
         }
     };
 }
+
 
 function getbrightspaceScraperFunction() {
     return async function() {
@@ -1331,7 +1801,17 @@ function getbrightspaceScraperFunction() {
                     '[class*="d2l-deadline"]',
                     '[class*="d2l-due-date"]',
                     '.d2l-list-item-content',
-                    '.d2l-tile-content'
+                    '.d2l-tile-content',
+                    // New additions:
+                    'd2l-activity-card',
+                    '.d2l-activity-card-deadline',
+                    '.d2l-activity-date',
+                    '.d2l-activity-due-date',
+                    '.d2l-activity-deadline-text',
+                    '.d2l-activity-card-footer',
+                    'd2l-activity-card-footer',
+                    '.d2l-activity-card-date',
+                    'd2l-activity-date'
                 ];
 
                 // Search for deadlines in both the outer and inner shadow roots
@@ -1339,21 +1819,66 @@ function getbrightspaceScraperFunction() {
                     // Check in outer shadow root
                     outerShadowRoot.querySelectorAll(selector).forEach(el => {
                         const text = el.textContent.trim();
-                        if (text) deadlines.push(text);
+                        if (text && !text.includes('%') && !text.includes('progress')) { // Filter out progress indicators
+                            deadlines.push(text);
+                            console.log(`Found deadline: ${text}`);
+                        }
                     });
                     
                     // Check in inner shadow root
                     innerShadowRoot.querySelectorAll(selector).forEach(el => {
                         const text = el.textContent.trim();
-                        if (text) deadlines.push(text);
+                        if (text && !text.includes('%') && !text.includes('progress')) {
+                            deadlines.push(text);
+                            console.log(`Found deadline: ${text}`);
+                        }
                     });
                     
                     // Use recursive traversal to find deadlines in nested shadow DOMs
                     const nestedDeadlineElements = traverseShadowDOM(element, selector);
                     nestedDeadlineElements.forEach(el => {
                         const text = el.textContent.trim();
-                        if (text) deadlines.push(text);
+                        if (text && !text.includes('%') && !text.includes('progress')) {
+                            deadlines.push(text);
+                            console.log(`Found nested deadline: ${text}`);
+                        }
                     });
+                }
+
+                // Add this improved course code extraction logic:
+                if (!courseCode) {
+                    console.log('No course code found in name, checking other elements.');
+                    // Look for course code in other elements within the card
+                    const possibleCodeElements = [
+                        ...innerShadowRoot.querySelectorAll('.d2l-card-text'),
+                        ...innerShadowRoot.querySelectorAll('.d2l-enrollment-card-code'),
+                        ...innerShadowRoot.querySelectorAll('[class*="code"]'),
+                        ...innerShadowRoot.querySelectorAll('[class*="course-code"]'),
+                        ...innerShadowRoot.querySelectorAll('.d2l-enrollment-card-title') // Add this line
+                    ];
+                    
+                    for (const el of possibleCodeElements) {
+                        const text = el.textContent.trim();
+                        // Improved pattern to capture course codes like "CSI3140"
+                        const codePattern = /([A-Z]{2,4}[-\s]?\d{3,4}[A-Z]?)/;
+                        const codeMatch = text.match(codePattern);
+                        if (codeMatch) {
+                            courseCode = codeMatch[1].replace(/\s+|-/g, '').toUpperCase();
+                            console.log(`Course Code found: ${courseCode}`);
+                            break;
+                        }
+                    }
+                }
+
+                // Add this fallback for courses with no code extracted:
+                if (!courseCode) {
+                    // Extract from URL as last resort
+                    const urlMatch = courseUrl.match(/\/([A-Z]{2,4}\d{3,4}[A-Z]?)_/i);
+                    if (urlMatch) {
+                        courseCode = urlMatch[1].toUpperCase();
+                    } else {
+                        courseCode = 'Unknown';
+                    }
                 }
                 console.log(`extractCourseInfoFromShadowDOM: Found ${deadlines.length} deadlines.`);
 
@@ -1549,10 +2074,14 @@ function getbrightspaceScraperFunction() {
                 
                 // Improved course code extraction
                 if (!course.code) {
-                    const codePattern = /([A-Z]{2,4}\s?\d{3,4}[A-Z]?)/i;
+                    const codePattern = /([A-Z]{2,4}[-\s]?\d{3,4}[A-Z]?)/i;
                     const codeMatch = course.name.match(codePattern);
                     if (codeMatch) {
-                        course.code = codeMatch[1].replace(/\s/g, '').toUpperCase();
+                        course.code = codeMatch[1].replace(/\s+|-/g, '').toUpperCase();
+                    } else {
+                        // Try extracting from URL
+                        const urlMatch = course.url.match(/\/([A-Z]{2,4}\d{3,4}[A-Z]?)_/i);
+                        course.code = urlMatch ? urlMatch[1].toUpperCase() : 'Unknown';
                     }
                 }
             }

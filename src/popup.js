@@ -968,7 +968,33 @@ class StudySyncApp {
             // Check if we have cached syllabus data
             const result = await chrome.storage.local.get(['syllabi']);
             const syllabi = result.syllabi || {};
-            const syllabusData = syllabi[course.courseId];
+            
+            // Try multiple possible keys for the syllabus data
+            const possibleKeys = [
+                course.courseId,
+                course.id,
+                course.code,
+                `${course.code}_${course.courseId}`,
+                course.name
+            ].filter(key => key); // Remove undefined values
+            
+            let syllabusData = null;
+            let foundKey = null;
+            
+            // Check each possible key
+            for (const key of possibleKeys) {
+                if (syllabi[key]) {
+                    syllabusData = syllabi[key];
+                    foundKey = key;
+                    console.log(`Found syllabus data with key: ${key}`, syllabusData);
+                    break;
+                }
+            }
+            
+            // Also check if there's any syllabus data at all and log it for debugging
+            console.log('All syllabus keys in storage:', Object.keys(syllabi));
+            console.log('Course object:', course);
+            console.log('Trying keys:', possibleKeys);
             
             if (syllabusData) {
                 console.log("Syllabus data from cache in viewSyllabus:", syllabusData);
@@ -988,44 +1014,78 @@ class StudySyncApp {
             console.error('Error viewing syllabus:', error);
         }
     }
-    
+    // Add this method to your StudySyncApp class for debugging
+    async debugStorage() {
+        try {
+            const result = await chrome.storage.local.get(null); // Get all storage
+            console.log('=== FULL CHROME STORAGE DEBUG ===');
+            console.log('All storage keys:', Object.keys(result));
+            
+            if (result.syllabi) {
+                console.log('Syllabi keys:', Object.keys(result.syllabi));
+                console.log('Syllabi data:', result.syllabi);
+            } else {
+                console.log('No syllabi data found in storage');
+            }
+            
+            if (result.courses) {
+                console.log('Courses array length:', result.courses.length);
+                console.log('First course:', result.courses[0]);
+            }
+            
+            if (result.studyData && result.studyData.courses) {
+                console.log('StudyData courses:', result.studyData.courses);
+            }
+            
+            console.log('=== END STORAGE DEBUG ===');
+        } catch (error) {
+            console.error('Error debugging storage:', error);
+        }
+    }
+
     async scrapeSyllabus(course) {
         this.showLoading('Fetching syllabus from Brightspace...');
         
         try {
-                const response = await chrome.runtime.sendMessage({
-                    action: 'scrapeSyllabus',
-                    courseUrl: course.url,
-                    courseId: course.courseId
-                });
-                
-                this.hideLoading();
-                
-                if (response.success) {
-                    this.showToast("Syllabus updated successfully!", "success");
-                    // Now show the syllabus using the view method
+            console.log('Scraping syllabus for course:', course);
+            console.log('Course URL:', course.url);
+            console.log('Course ID:', course.courseId);
+            
+            const response = await chrome.runtime.sendMessage({
+                action: 'scrapeSyllabus',
+                courseUrl: course.url,
+                courseId: course.courseId
+            });
+            
+            console.log('Scrape syllabus response:', response);
+            
+            this.hideLoading();
+            
+            if (response.success) {
+                this.showToast("Syllabus updated successfully!", "success");
+                // Small delay to ensure storage is updated
+                setTimeout(async () => {
                     await this.viewSyllabus(course);
-                } else {
-                    this.showToast("Failed to fetch syllabus: " + response.error, "error");
-                }
-            } catch (error) {
-                this.hideLoading();
-                this.showToast('Error fetching syllabus', 'error');
-                console.error('Error scraping syllabus:', error);
+                }, 500);
+            } else {
+                console.error('Scrape failed:', response.error);
+                this.showToast("Failed to fetch syllabus: " + (response.error || 'Unknown error'), "error");
             }
+        } catch (error) {
+            this.hideLoading();
+            this.showToast('Error fetching syllabus', 'error');
+            console.error('Error scraping syllabus:', error);
+        }
     }
     
     showSyllabusModal(course, syllabusData) {
         console.log("Syllabus Data received in showSyllabusModal:", syllabusData);
         
-        // Check if PDF is available
         if (syllabusData.outlinePdfUrl) {
-            // Open PDF directly in new tab
             chrome.tabs.create({ url: syllabusData.outlinePdfUrl });
             return;
         }
         
-        // If no PDF, show text content modal
         const modal = document.createElement("div");
         modal.className = 'modal syllabus-modal';
         
@@ -1055,6 +1115,52 @@ class StudySyncApp {
             </div>
         `;
         
+        // Improved deadline display
+        if (syllabusData.deadlines && syllabusData.deadlines.length > 0) {
+            const deadlinesSection = document.createElement('div');
+            deadlinesSection.className = 'syllabus-deadlines';
+            
+            // Group deadlines by type
+            const groupedDeadlines = this.groupDeadlinesByType(syllabusData.deadlines);
+            
+            deadlinesSection.innerHTML = `
+                <h4>Important Deadlines</h4>
+                ${Object.entries(groupedDeadlines).map(([type, items]) => `
+                    <div class="deadline-group">
+                        <h5 class="deadline-type">${type}</h5>
+                        <div class="deadlines-list">
+                            ${items.map(deadline => `
+                                <div class="deadline-item">
+                                    <span class="deadline-icon">${this.getDeadlineIcon(type)}</span>
+                                    <div class="deadline-info">
+                                        <span class="deadline-title">${deadline.title}</span>
+                                        <span class="deadline-date">${deadline.dueDate}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            `;
+            modal.querySelector('.syllabus-body').appendChild(deadlinesSection);
+        } else {
+            const noDeadlines = document.createElement('p');
+            noDeadlines.className = 'no-deadlines';
+            noDeadlines.textContent = 'No deadlines found in syllabus. This might be because:';
+            
+            const reasons = document.createElement('ul');
+            reasons.className = 'no-deadlines-reasons';
+            reasons.innerHTML = `
+                <li>The syllabus is in PDF format</li>
+                <li>Deadlines weren't in a detectable format</li>
+                <li>The syllabus structure is complex</li>
+            `;
+            
+            noDeadlines.appendChild(reasons);
+            modal.querySelector('.syllabus-body').appendChild(noDeadlines);
+        }
+  
+        
         document.body.appendChild(modal);
         
         // Add event listeners
@@ -1075,7 +1181,20 @@ class StudySyncApp {
             await this.scrapeSyllabus(course);
         });
     }
-    
+    groupDeadlinesByType(deadlines) {
+        const deadlineProcessor = new DeadlineProcessor(); // Use the same processor as background
+        const grouped = {};
+        
+        deadlines.forEach(deadline => {
+            const category = deadlineProcessor.categorizeDeadline(deadline.title);
+            const type = category.type;
+            if (!grouped[type]) grouped[type] = [];
+            grouped[type].push(deadline);
+        });
+        
+        return grouped;
+    }
+
     formatSyllabusContent(content) {
         if (!content) return '<p>No content available</p>';
         
@@ -1113,6 +1232,16 @@ class StudySyncApp {
         if (overlay) overlay.classList.add('hidden');
     }
 
+    getDeadlineIcon(type) {
+        const icons = {
+            assignment: '📝',
+            quiz: '🧪',
+            exam: '📅',
+            default: '⏰'
+        };
+        return icons[type] || icons.default;
+    }
+
     showToast(message, type = 'info', duration = 3000) {
         const container = document.getElementById('toast-container');
         if (!container) return;
@@ -1148,6 +1277,14 @@ class StudySyncApp {
     }
 }
 
+// Also add this method to manually trigger storage debug from console
+window.debugStorage = () => {
+    if (window.studySyncApp) {
+        window.studySyncApp.debugStorage();
+    } else {
+        console.log('StudySync app not ready');
+    }
+};
 // Initialize the app when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.studySyncApp = new StudySyncApp();
