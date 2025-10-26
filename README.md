@@ -61,7 +61,6 @@ StudySync/
 
 ## Installation
 
-```bash
 # Clone the repo
 git clone https://github.com/mmdoo7123/StudySync.git
 cd StudySync
@@ -72,8 +71,7 @@ npm install
 # Run development server
 npm start
 Deployment
-bash
-Copy code
+
 # Build project
 npm run build
 
@@ -96,8 +94,6 @@ MIT License. See LICENSE for details.
 
 Author
 Mahmoud Zourob – mahmoudzourob13@gmail.com
-
-Would you like me to finalize this README using your actual folder structure and features? Just paste them in, and I’ll refine it further!
 
 # StudySync
 
@@ -158,9 +154,6 @@ StudySync/
 ├── rollup.config.js # JS bundler for background scripts
 └── dist/ # Rollup output
 
-bash
-Copy code
-
 ## Requirements
 
 - Google Developer Account (for Calendar API credentials)
@@ -175,8 +168,6 @@ Copy code
    cd StudySync
 Install dependencies and build:
 
-bash
-Copy code
 npm install
 npx rollup -c
 Load extension into Chrome:
@@ -220,8 +211,7 @@ https://www.googleapis.com/calendar/v3/ access
 OAuth scopes: calendar.events, calendar.readonly
 
 Development Commands
-bash
-Copy code
+
 # Build background script
 npx rollup -c
 
@@ -243,5 +233,6 @@ Author
 👨‍💻 Mahmoud Zourob
 📫 mahmoudzourob13@gmail.com
 📍 Ottawa, Canada
+
 
 
