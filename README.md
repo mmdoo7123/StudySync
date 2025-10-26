@@ -1,40 +1,48 @@
-# StudySync  
-A unified platform for collaborative study‑sessions, note‑sharing and real‑time synchronization.
+# StudySync
 
-## 🎯 Project Overview  
-StudySync is designed to help students connect, collaborate and share in real time. Built with modern web technologies, embedded cloud services and a strong emphasis on user‑flow and realtime updates.  
-Whether you’re organising a group study session, sharing notes, or working on a joint project — StudySync aims to make it seamless.
+A feature-rich Chrome extension built for university students to synchronize their academic life. StudySync intelligently extracts deadlines from Brightspace and PDF syllabi, categorizes them, and integrates them with Google Calendar. It also includes a Pomodoro-style study timer, streak tracker, analytics dashboard, and a polished UI with light/dark modes.
 
-## 🧩 Key Features  
-- Real‑time collaboration: chat, shared whiteboards/notes, live updates.  
-- Multi‑platform support: Web app (React/JavaScript) + backend services.  
-- User authentication & management (via Firebase / other integrated auth).  
-- Project / Study‑Session management (create, join, leave, schedule sessions).  
-- Data persistence & syncing: ensure all participants see the same view at the same time.  
-- Responsive UI/UX: mobile and desktop friendly.
+## Features
 
-## 🛠️ Technology Stack  
-- Front‑end: React, JavaScript/TypeScript (or relevant framework)  
-- Back‑end: Firebase (Firestore, Auth, Functions) and/or custom APIs  
-- Real‑time services: WebSockets or Firebase real‑time features  
-- Dev tools & deployment: Node.js, npm/yarn, Firebase CLI, Docker (optional)  
-- Data storage: Cloud database (e.g., Firestore) and user file storage as needed  
-- Hosting: Firebase Hosting / any static‑/server‑hosting
+- **Deadline Extraction**
+  - Automatically scrapes Brightspace and PDF syllabi
+  - Extracts assignment, quiz, and exam deadlines using NLP-enhanced matching
+  - Deduplicates and categorizes using confidence scoring
 
-## 🚀 Getting Started  
-### Prerequisites  
-- Node.js >= 14  
-- npm or yarn  
-- Firebase account & CLI installed if using Firebase services  
-- (Optional) Docker if using containerised services  
+- **Calendar Integration**
+  - Syncs extracted deadlines to Google Calendar
+  - Avoids duplicates using event fingerprinting
+  - Sends popup and email reminders 1 day and 1 hour before deadlines
 
-### Installation  
-```bash
-# Clone repository  
-git clone https://github.com/mmdoo7123/StudySync.git  
-cd StudySync  
+- **Pomodoro-style Study Timer**
+  - Customizable focus/break modes
+  - Tracks daily study time, subject, and topic
+  - Auto-records session stats to dashboard
 
-# Install dependencies  
-npm install  
-# or  
-yarn install  
+- **Student Dashboard**
+  - Tracks day streaks, courses, study time, and goals
+  - Course-wise analytics view
+  - Google sign-in + session expiration handler
+
+- **Brightspace Integration**
+  - Scrapes syllabus PDFs when opened
+  - Automatically monitors for updates via service worker
+  - Smart toast notifications and update history
+
+## UI Highlights
+
+- Responsive UI with light/dark theme
+- Tabbed navigation: Dashboard, Study, Courses, Analytics
+- Beautiful login page with animated cards
+- Theme toggle, action buttons, and interactive charts
+
+## Tech Stack
+
+- **Frontend**: HTML, CSS, JavaScript  
+- **Extension API**: Chrome Storage, Alarms, Tabs, Notifications, Runtime Messaging  
+- **Backend Utilities**: PDF.js, Google Calendar API, Regex-enhanced NLP  
+- **Bundler**: Rollup.js  
+- **Deployment**: Chrome Web Store (manual)
+
+## Folder Structure
+
