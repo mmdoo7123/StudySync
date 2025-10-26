@@ -99,15 +99,6 @@ Mahmoud Zourob – mahmoudzourob13@gmail.com
 
 Would you like me to finalize this README using your actual folder structure and features? Just paste them in, and I’ll refine it further!
 
-
-
-
-
-Resume/CV said:
-Based on the structure, components, and purpose of the StudySync project you've shared, here’s a professional, detailed, and clear README.md file — styled after the Headrest Control System format you requested:
-
-markdown
-Copy code
 # StudySync
 
 A feature-rich Chrome extension built for university students to synchronize their academic life. StudySync intelligently extracts deadlines from Brightspace and PDF syllabi, categorizes them, and integrates them with Google Calendar. It also includes a Pomodoro-style study timer, streak tracker, analytics dashboard, and a polished UI with light/dark modes.
@@ -252,4 +243,5 @@ Author
 👨‍💻 Mahmoud Zourob
 📫 mahmoudzourob13@gmail.com
 📍 Ottawa, Canada
+
 
