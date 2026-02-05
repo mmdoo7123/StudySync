@@ -74,9 +74,6 @@ View/edit notes live with your peers
 Contribution
 Pull requests are welcome! For major changes, open an issue first to discuss what you’d like to change.
 
-License
-MIT License. See LICENSE for details.
-
 Author
 Mahmoud Zourob – mahmoudzourob13@gmail.com
 
@@ -94,12 +91,12 @@ A feature-rich Chrome extension built for university students to synchronize the
 - **Calendar Integration**
   - Syncs extracted deadlines to Google Calendar
   - Avoids duplicates using event fingerprinting
-  - Sends popup and email reminders 1 day and 1 hour before deadlines
+  - Sends popups and email reminders 24 hours before deadlines
 
 - **Pomodoro-style Study Timer**
   - Customizable focus/break modes
   - Tracks daily study time, subject, and topic
-  - Auto-records session stats to dashboard
+  - Auto-records session stats to the dashboard
 
 - **Student Dashboard**
   - Tracks day streaks, courses, study time, and goals
@@ -125,19 +122,6 @@ A feature-rich Chrome extension built for university students to synchronize the
 - **Backend Utilities**: PDF.js, Google Calendar API, Regex-enhanced NLP  
 - **Bundler**: Rollup.js  
 - **Deployment**: Chrome Web Store (manual)
-
-## Folder Structure
-
-StudySync/
-├── popup.html # Extension popup interface
-├── popup.css # Modern responsive styles
-├── popup.js # UI logic, timer, tabs, analytics
-├── background.js # Service worker: session mgmt, PDF scraper
-├── deadline_processor.js # Deadline parsing & normalization
-├── optimized_pdf_extractor.js # PDF.js integration & deadline parsing
-├── calendar_integration.js # Google Calendar API support
-├── rollup.config.js # JS bundler for background scripts
-└── dist/ # Rollup output
 
 ## Requirements
 
@@ -211,13 +195,11 @@ Native mobile notifications
 
 Dark mode sync with system
 
-License
-MIT License. See LICENSE for full terms.
-
 Author
 👨‍💻 Mahmoud Zourob
 📫 mahmoudzourob13@gmail.com
 📍 Ottawa, Canada
+
 
 
 
