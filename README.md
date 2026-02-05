@@ -44,21 +44,6 @@ A feature-rich Chrome extension built for university students to synchronize the
 - **Bundler**: Rollup.js  
 - **Deployment**: Chrome Web Store (manual)
 
-## Folder Structure
-StudySync/
-├── public/ # Static files (index.html, favicon, etc.)
-├── src/ # Main application source
-│ ├── components/ # Reusable React components
-│ ├── pages/ # Route pages
-│ ├── context/ # Context providers (auth, theme, etc.)
-│ ├── hooks/ # Custom React hooks
-│ ├── utils/ # Helper functions
-│ ├── services/ # Firebase/Auth APIs
-│ └── App.js # Main app component
-├── .env # Environment variables
-├── firebase.json # Firebase config
-├── package.json
-
 ## Installation
 
 # Clone the repo
@@ -233,6 +218,7 @@ Author
 👨‍💻 Mahmoud Zourob
 📫 mahmoudzourob13@gmail.com
 📍 Ottawa, Canada
+
 
 
 
